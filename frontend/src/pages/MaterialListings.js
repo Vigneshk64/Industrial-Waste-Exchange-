@@ -1,28 +1,44 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import MaterialCard from '../components/MaterialCard';
-
-const materials = [
-  { name: 'HDPE Scrap', category: 'Plastic', quantity: '320 kg', grade: 'Grade A', company: 'EcoFlow Industries', location: 'Pune, MH', status: 'Available', price: '48' },
-  { name: 'Aluminium Offcuts', category: 'Metal', quantity: '1.2 t', grade: 'Recycled', company: 'SteelCore Ltd.', location: 'Vapi, GJ', status: 'Reserved', price: '145' },
-  { name: 'Fly Ash', category: 'Ash', quantity: '800 kg', grade: 'Industrial', company: 'GreenCem Materials', location: 'Nagpur, MH', status: 'Available', price: '22' },
-  { name: 'Copper Wire Scrap', category: 'Metal', quantity: '620 kg', grade: 'Grade B', company: 'Ramco Metals', location: 'Ahmedabad, GJ', status: 'Available', price: '176' },
-  { name: 'Organic Compost Feed', category: 'Organic', quantity: '1.4 t', grade: 'Processed', company: 'AgriCycle', location: 'Nashik, MH', status: 'Low stock', price: '31' },
-  { name: 'PP Granules', category: 'Plastic', quantity: '950 kg', grade: 'Virgin grade', company: 'PolyCycle', location: 'Hyderabad, TS', status: 'Available', price: '59' },
-];
+import { approveListing, createRequest, getListings } from '../services/workflow';
 
 export default function MaterialListings() {
+  const [searchParams] = useSearchParams();
+  const reviewId = searchParams.get('review');
+  const [materials, setMaterials] = useState([]);
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [status, setStatus] = useState('All');
   const [sort, setSort] = useState('Newest');
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState('success');
+  const [loadError, setLoadError] = useState('');
+  const reviewListings = materials.filter((item) => item.status === 'Pending review');
+
+  useEffect(() => {
+    try {
+      const listings = getListings();
+      setMaterials(listings);
+      if (reviewId && listings.some((listing) => listing.id === reviewId)) {
+        setMessage('Your listing is awaiting review. Approve it to publish it for seekers.');
+      }
+    } catch (error) {
+      setLoadError(error.message || 'Unable to load material listings.');
+    }
+  }, [reviewId]);
+
+  useEffect(() => {
+    setSearch(searchParams.get('search') || '');
+  }, [searchParams]);
 
   const filteredMaterials = useMemo(() => {
     const result = materials.filter((item) => {
       const matchesQuery = item.name.toLowerCase().includes(search.toLowerCase());
       const matchesCategory = category === 'All' || item.category === category;
       const matchesStatus = status === 'All' || item.status === status;
-      return matchesQuery && matchesCategory && matchesStatus;
+      return item.status !== 'Pending review' && matchesQuery && matchesCategory && matchesStatus;
     });
 
     if (sort === 'Price: High to Low') {
@@ -34,7 +50,32 @@ export default function MaterialListings() {
     }
 
     return result;
-  }, [search, category, status, sort]);
+  }, [materials, search, category, status, sort]);
+
+  const handleReset = () => {
+    setSearch('');
+    setCategory('All');
+    setStatus('All');
+    setSort('Newest');
+  };
+
+  const handleRequest = (material, details) => {
+    createRequest(material, details);
+    setMessageType('success');
+    setMessage('Interest sent. You can follow the request through each exchange step on the Requests page.');
+  };
+
+  const handleApprove = (material) => {
+    try {
+      const approved = approveListing(material.id);
+      setMaterials((current) => current.map((item) => (item.id === approved.id ? approved : item)));
+      setMessageType('success');
+      setMessage('Listing reviewed and published. It is now available to material seekers.');
+    } catch (error) {
+      setMessageType('error');
+      setMessage(error.message || 'Unable to publish this listing.');
+    }
+  };
 
   return (
     <div>
@@ -45,6 +86,9 @@ export default function MaterialListings() {
         </div>
         <button type="button" className="btn btn-primary-custom">Export Results</button>
       </div>
+
+      {loadError ? <div className="inline-message error">{loadError}</div> : null}
+      {message ? <div className={`inline-message ${messageType}`}>{message}</div> : null}
 
       <div className="panel-card mb-4">
         <div className="row g-3 align-items-end">
@@ -83,15 +127,30 @@ export default function MaterialListings() {
             </select>
           </div>
           <div className="col-md-2">
-            <button type="button" className="btn btn-secondary-custom w-100">Reset filters</button>
+            <button type="button" className="btn btn-secondary-custom w-100" onClick={handleReset}>Reset filters</button>
           </div>
         </div>
       </div>
 
+      {reviewListings.length ? (
+        <section className="panel-card mb-4">
+          <div className="panel-header">
+            <h3>Provider review queue</h3>
+            <span className="chip">{reviewListings.length} awaiting review</span>
+          </div>
+          <p className="text-muted small">Validate each new listing and publish it before it appears in seeker search.</p>
+          <div className="material-grid">
+            {reviewListings.map((item) => (
+              <MaterialCard key={item.id} material={item} onRequest={handleRequest} onApprove={handleApprove} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {filteredMaterials.length ? (
         <div className="material-grid">
           {filteredMaterials.map((item) => (
-            <MaterialCard key={item.name} material={item} />
+            <MaterialCard key={item.id} material={item} onRequest={handleRequest} onApprove={handleApprove} />
           ))}
         </div>
       ) : (

@@ -1,29 +1,45 @@
+import { useState } from 'react';
 import { Bell, ChevronDown, Plus, Search } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 
 export default function Navbar() {
+  const navigate = useNavigate();
+  const [search, setSearch] = useState('');
+
+  const handleSearch = (event) => {
+    event.preventDefault();
+    navigate(`/materials?search=${encodeURIComponent(search.trim())}`);
+  };
+
   return (
     <header className="topbar">
-      <div className="topbar-search">
+      <form className="topbar-search" onSubmit={handleSearch}>
         <Search size={18} color="#45645c" />
-        <input type="text" placeholder="Search materials, suppliers, or requests" aria-label="Search" />
-      </div>
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search material listings"
+          aria-label="Search materials"
+        />
+      </form>
 
       <div className="topbar-actions">
-        <button type="button" className="btn btn-primary-custom">
+        <Link to="/add-material" className="btn btn-primary-custom">
           <Plus size={16} className="me-2" />
           Add Listing
-        </button>
-        <button type="button" className="icon-btn" aria-label="Notifications">
+        </Link>
+        <Link to="/requests" className="icon-btn" aria-label="View exchange requests">
           <Bell size={18} />
-        </button>
-        <div className="profile-pill">
+        </Link>
+        <Link to="/profile" className="profile-pill">
           <div className="profile-avatar">P</div>
           <div>
             <strong>Priya Nair</strong>
             <div className="small text-muted">Operations Lead</div>
           </div>
           <ChevronDown size={16} color="#45645c" />
-        </div>
+        </Link>
       </div>
     </header>
   );

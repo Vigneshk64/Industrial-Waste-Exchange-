@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { saveListing } from '../services/workflow';
 
 const defaultForm = {
   name: '',
@@ -11,17 +13,77 @@ const defaultForm = {
   location: '',
   pickup: 'Pickup',
   date: '',
-  image: '',
+  image: null,
   notes: '',
 };
 
 export default function AddMaterial() {
+  const navigate = useNavigate();
   const [form, setForm] = useState(defaultForm);
   const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState('success');
+
+  // Auto-load a saved draft (if present) when the component mounts
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('addMaterialDraft');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      // parsed.image contains only the filename; files cannot be restored from localStorage.
+      const loaded = {
+        ...defaultForm,
+        ...parsed,
+        image: null,
+      };
+      setForm(loaded);
+      setMessage(parsed ? `Loaded saved draft${parsed.image ? ` (image: ${parsed.image})` : ''}` : 'Loaded saved draft.');
+    } catch (err) {
+      // ignore parse errors
+      console.warn('Failed to load draft', err);
+    }
+  }, []);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleFileChange = (event) => {
+    const file = event.target.files && event.target.files[0];
+    setForm((current) => ({ ...current, image: file }));
+  };
+
+  const handleSaveDraft = () => {
+    try {
+      // Store a lightweight, serializable draft (files are not serializable: store filename only)
+      const serializable = { ...form, image: form.image ? form.image.name : null };
+      localStorage.setItem('addMaterialDraft', JSON.stringify(serializable));
+      setMessage('Draft saved locally.');
+    } catch (err) {
+      console.error('Save draft error', err);
+      setMessage('Unable to save draft.');
+    }
+  };
+
+  const handleLoadDraft = () => {
+    try {
+      const raw = localStorage.getItem('addMaterialDraft');
+      if (!raw) {
+        setMessage('No saved draft found.');
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const loaded = {
+        ...defaultForm,
+        ...parsed,
+        image: null,
+      };
+      setForm(loaded);
+      setMessage(parsed ? `Loaded draft${parsed.image ? ` (image: ${parsed.image})` : ''}` : 'Loaded saved draft.');
+    } catch (err) {
+      console.error('Load draft error', err);
+      setMessage('Failed to load draft.');
+    }
   };
 
   const handleSubmit = (event) => {
@@ -30,13 +92,20 @@ export default function AddMaterial() {
     const hasEmptyRequired = requiredFields.some((value) => !String(value).trim());
 
     if (hasEmptyRequired) {
+      setMessageType('error');
       setMessage('Please complete the required fields before publishing the listing.');
       return;
     }
 
-    console.log('New material listing created:', form);
-    setMessage('Listing saved successfully. It is ready for review in demo mode.');
-    setForm(defaultForm);
+    try {
+      const listing = saveListing(form);
+      localStorage.removeItem('addMaterialDraft');
+      navigate(`/materials?review=${encodeURIComponent(listing.id)}`);
+    } catch (error) {
+      console.error('Publish listing error', error);
+      setMessageType('error');
+      setMessage(error.message || 'Unable to publish this listing.');
+    }
   };
 
   return (
@@ -49,7 +118,7 @@ export default function AddMaterial() {
       </div>
 
       <div className="panel-card">
-        {message ? <div className="inline-message success">{message}</div> : null}
+        {message ? <div className={`inline-message ${messageType}`}>{message}</div> : null}
 
         <form onSubmit={handleSubmit}>
           <div className="form-row">
@@ -123,7 +192,7 @@ export default function AddMaterial() {
             </div>
             <div className="form-group">
               <label className="form-label">Material image</label>
-              <input className="form-control" type="file" name="image" value={form.image} onChange={handleChange} />
+              <input className="form-control" type="file" name="image" onChange={handleFileChange} />
             </div>
           </div>
 
@@ -133,7 +202,10 @@ export default function AddMaterial() {
           </div>
 
           <div className="d-flex justify-content-between align-items-center mt-4">
-            <button type="button" className="btn btn-secondary-custom">Save draft</button>
+            <div className="btn-group">
+              <button type="button" className="btn btn-outline-custom me-2" onClick={handleLoadDraft}>Load draft</button>
+              <button type="button" className="btn btn-secondary-custom me-2" onClick={handleSaveDraft}>Save draft</button>
+            </div>
             <button type="submit" className="btn btn-primary-custom">Publish listing</button>
           </div>
         </form>

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './App.css';
 import Navbar from './components/Navbar';
@@ -12,6 +13,7 @@ import CompanyProfile from './pages/CompanyProfile';
 import EnvironmentalImpact from './pages/EnvironmentalImpact';
 import LoginPage from './pages/Login';
 import RegisterPage from './pages/Register';
+import { isSupabaseConfigured, supabase } from './services/supabase';
 
 function AppLayout() {
   return (
@@ -38,6 +40,50 @@ function AppLayout() {
   );
 }
 
+function AuthenticatedApp() {
+  const [session, setSession] = useState(null);
+  const [isCheckingSession, setIsCheckingSession] = useState(isSupabaseConfigured);
+  const [authError, setAuthError] = useState('');
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return undefined;
+
+    let isActive = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (isActive) {
+        setSession(nextSession);
+        setIsCheckingSession(false);
+      }
+    });
+
+    supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (!isActive) return;
+        if (error) {
+          setAuthError(error.message);
+        } else {
+          setSession(data.session);
+        }
+        setIsCheckingSession(false);
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        setAuthError(error.message || 'Unable to verify your session.');
+        setIsCheckingSession(false);
+      });
+
+    return () => {
+      isActive = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  if (!isSupabaseConfigured) return <AppLayout />;
+  if (isCheckingSession) return <div className="auth-status">Checking your session...</div>;
+  if (authError) return <div className="auth-status inline-message error">{authError}</div>;
+  return session ? <AppLayout /> : <Navigate to="/login" replace />;
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -45,7 +91,7 @@ function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
-        <Route path="/*" element={<AppLayout />} />
+        <Route path="/*" element={<AuthenticatedApp />} />
       </Routes>
     </BrowserRouter>
   );

@@ -1,4 +1,7 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import MatchCard from '../components/MatchCard';
+import { createRequest } from '../services/workflow';
 
 const matches = [
   { material: 'Polypropylene Pellets', company: 'IndoPlast Ltd.', category: 'Plastic', quantity: '400 kg', grade: 'Food grade', location: 'Pune, MH', score: 92, reason: 'Strong specification compatibility and warehouse proximity.', distance: '18 km away' },
@@ -8,6 +11,26 @@ const matches = [
 ];
 
 export default function MatchingResults() {
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] = useState('success');
+
+  const handleRequest = (match, details) => {
+    try {
+      createRequest({
+        ...match,
+        id: `match-${match.material.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        name: match.material,
+        status: 'Available',
+      }, details);
+      setMessageType('success');
+      setMessage(`Interest sent for ${match.material}. Track the exchange from Requests.`);
+    } catch (error) {
+      setMessageType('error');
+      setMessage(error.message || 'Unable to send this request.');
+      throw error;
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -15,8 +38,10 @@ export default function MatchingResults() {
           <h2>Material matching</h2>
           <p>Rule-based recommendations generated from supplier specifications, quantity, and location fit.</p>
         </div>
-        <button type="button" className="btn btn-primary-custom">Refresh matches</button>
+        <Link to="/materials" className="btn btn-primary-custom">Browse all listings</Link>
       </div>
+
+      {message ? <div className={`inline-message ${messageType}`}>{message}</div> : null}
 
       <div className="panel-card mb-4">
         <div className="chip-list">
@@ -29,7 +54,7 @@ export default function MatchingResults() {
 
       <div className="matches-grid">
         {matches.map((match) => (
-          <MatchCard key={match.material} match={match} />
+          <MatchCard key={match.material} match={match} onRequest={handleRequest} />
         ))}
       </div>
     </div>

@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { BarChart3, Factory, FileText, LayoutDashboard, LogOut, MapPinned, PlusCircle, ShoppingCart, UserCircle2 } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { isSupabaseConfigured, supabase } from '../services/supabase';
 
 const navItems = [
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
@@ -12,6 +14,25 @@ const navItems = [
 ];
 
 export default function Sidebar() {
+  const navigate = useNavigate();
+  const [signOutError, setSignOutError] = useState('');
+
+  const handleSignOut = async () => {
+    setSignOutError('');
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          setSignOutError(error.message || 'Unable to sign out.');
+          return;
+        }
+      }
+      navigate('/login');
+    } catch (error) {
+      setSignOutError(error.message || 'Unable to sign out.');
+    }
+  };
+
   return (
     <aside className="sidebar">
       <div className="brand-block">
@@ -44,7 +65,8 @@ export default function Sidebar() {
           <FileText size={16} />
           Monthly impact report ready
         </div>
-        <button className="btn btn-outline-light mt-3 w-100" type="button">
+        {signOutError ? <div className="inline-message error mt-3">{signOutError}</div> : null}
+        <button className="btn btn-outline-light mt-3 w-100" type="button" onClick={handleSignOut}>
           <LogOut size={16} className="me-2" />
           Sign out
         </button>
