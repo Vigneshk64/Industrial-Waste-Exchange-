@@ -1,10 +1,49 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, Bot, ChevronDown, HelpCircle, Plus, Search } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { getCurrentUserProfile } from '../services/authProfile';
+
+function getInitials(name = '') {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return name.slice(0, 1).toUpperCase() || 'P';
+}
 
 export default function Navbar({ onOpenChat, onOpenHelp }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [userProfile, setUserProfile] = useState({
+    name: 'Industrial Partner',
+    contact: 'Operations Lead',
+    role: 'Partner',
+  });
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadNavProfile() {
+      try {
+        const profile = await getCurrentUserProfile();
+        if (isActive) {
+          setUserProfile(profile);
+        }
+      } catch {}
+    }
+
+    loadNavProfile();
+
+    const handleProfileUpdate = () => {
+      loadNavProfile();
+    };
+
+    window.addEventListener('user-profile-updated', handleProfileUpdate);
+    return () => {
+      isActive = false;
+      window.removeEventListener('user-profile-updated', handleProfileUpdate);
+    };
+  }, []);
 
   const handleSearch = (event) => {
     event.preventDefault();
@@ -55,10 +94,10 @@ export default function Navbar({ onOpenChat, onOpenHelp }) {
         </Link>
 
         <Link to="/profile" className="profile-pill">
-          <div className="profile-avatar">E</div>
+          <div className="profile-avatar">{getInitials(userProfile.name)}</div>
           <div>
-            <strong>EcoFlow Enterprise</strong>
-            <div className="small text-muted">Industrial Partner</div>
+            <strong>{userProfile.name}</strong>
+            <div className="small text-muted">{userProfile.contact || userProfile.role}</div>
           </div>
           <ChevronDown size={16} color="#45645c" />
         </Link>
