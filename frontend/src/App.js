@@ -4,6 +4,8 @@ import './App.css';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import Footer from './components/Footer';
+import AIChatbotModal from './components/AIChatbotModal';
+import HelpMenuModal from './components/HelpMenuModal';
 import Dashboard from './pages/Dashboard';
 import MaterialListings from './pages/MaterialListings';
 import AddMaterial from './pages/AddMaterial';
@@ -16,11 +18,17 @@ import RegisterPage from './pages/Register';
 import { isSupabaseConfigured, supabase } from './services/supabase';
 
 function AppLayout() {
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar onOpenChat={() => setIsChatOpen(true)} onOpenHelp={() => setIsHelpOpen(true)} />
       <div className="main-panel">
-        <Navbar />
+        <Navbar
+          onOpenChat={() => setIsChatOpen(prev => !prev)}
+          onOpenHelp={() => setIsHelpOpen(true)}
+        />
         <main className="page-wrapper">
           <Routes>
             <Route index element={<Navigate to="/dashboard" replace />} />
@@ -36,6 +44,9 @@ function AppLayout() {
         </main>
         <Footer />
       </div>
+
+      <AIChatbotModal isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+      <HelpMenuModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { PlusCircle, Search } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
 import MaterialCard from '../components/MaterialCard';
-import { approveListing, createRequest, getListings } from '../services/workflow';
+import { approveListing, createRequest, fetchListings } from '../services/workflow';
 
 export default function MaterialListings() {
   const [searchParams] = useSearchParams();
@@ -15,18 +15,29 @@ export default function MaterialListings() {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
   const [loadError, setLoadError] = useState('');
-  const reviewListings = materials.filter((item) => item.status === 'Pending review');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const reviewListings = materials.filter(
+    (item) => (item.status === 'Pending review' || item.availability_status === 'pending_review')
+  );
+
+  const loadData = async () => {
     try {
-      const listings = getListings();
-      setMaterials(listings);
+      setLoading(true);
+      const listings = await fetchListings();
+      setMaterials(listings || []);
       if (reviewId && listings.some((listing) => listing.id === reviewId)) {
         setMessage('Your listing is awaiting review. Approve it to publish it for seekers.');
       }
     } catch (error) {
       setLoadError(error.message || 'Unable to load material listings.');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    loadData();
   }, [reviewId]);
 
   useEffect(() => {
@@ -35,18 +46,23 @@ export default function MaterialListings() {
 
   const filteredMaterials = useMemo(() => {
     const result = materials.filter((item) => {
-      const matchesQuery = item.name.toLowerCase().includes(search.toLowerCase());
-      const matchesCategory = category === 'All' || item.category === category;
-      const matchesStatus = status === 'All' || item.status === status;
-      return item.status !== 'Pending review' && matchesQuery && matchesCategory && matchesStatus;
+      const itemName = item.name || item.title || '';
+      const itemCategory = item.category || item.category_name || '';
+      const itemStatus = item.status || (item.availability_status === 'available' ? 'Available' : item.availability_status) || '';
+
+      const matchesQuery = itemName.toLowerCase().includes(search.toLowerCase());
+      const matchesCategory = category === 'All' || itemCategory.toLowerCase() === category.toLowerCase();
+      const matchesStatus = status === 'All' || itemStatus.toLowerCase() === status.toLowerCase();
+
+      return itemStatus !== 'Pending review' && itemStatus !== 'pending_review' && matchesQuery && matchesCategory && matchesStatus;
     });
 
     if (sort === 'Price: High to Low') {
-      return [...result].sort((a, b) => Number(b.price) - Number(a.price));
+      return [...result].sort((a, b) => Number(b.price || b.price_per_unit || 0) - Number(a.price || a.price_per_unit || 0));
     }
 
     if (sort === 'Price: Low to High') {
-      return [...result].sort((a, b) => Number(a.price) - Number(b.price));
+      return [...result].sort((a, b) => Number(a.price || a.price_per_unit || 0) - Number(b.price || b.price_per_unit || 0));
     }
 
     return result;
@@ -81,10 +97,13 @@ export default function MaterialListings() {
     <div>
       <div className="page-header">
         <div>
-          <h2>Material listings</h2>
-          <p>Browse reusable industrial materials and surplus inventory.</p>
+          <h2>Material Listings</h2>
+          <p>Browse reusable industrial materials and surplus inventory available for exchange.</p>
         </div>
-        <button type="button" className="btn btn-primary-custom">Export Results</button>
+        <Link to="/add-material" className="btn btn-primary-custom">
+          <PlusCircle size={16} className="me-2" />
+          Add Listing
+        </Link>
       </div>
 
       {loadError ? <div className="inline-message error">{loadError}</div> : null}
@@ -96,7 +115,7 @@ export default function MaterialListings() {
             <label className="form-label">Search material</label>
             <div className="topbar-search mb-0">
               <Search size={18} color="#45645c" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="Search by name" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} type="text" placeholder="Search by name or keyword" />
             </div>
           </div>
           <div className="col-md-2">
@@ -107,6 +126,10 @@ export default function MaterialListings() {
               <option>Metal</option>
               <option>Organic</option>
               <option>Ash</option>
+              <option>Textile</option>
+              <option>Chemical</option>
+              <option>Construction</option>
+              <option>Rubber</option>
             </select>
           </div>
           <div className="col-md-2">
@@ -135,7 +158,7 @@ export default function MaterialListings() {
       {reviewListings.length ? (
         <section className="panel-card mb-4">
           <div className="panel-header">
-            <h3>Provider review queue</h3>
+            <h3>Provider Review Queue</h3>
             <span className="chip">{reviewListings.length} awaiting review</span>
           </div>
           <p className="text-muted small">Validate each new listing and publish it before it appears in seeker search.</p>
@@ -147,7 +170,11 @@ export default function MaterialListings() {
         </section>
       ) : null}
 
-      {filteredMaterials.length ? (
+      {loading ? (
+        <div className="panel-card text-center py-5">
+          <p className="text-muted">Loading material listings...</p>
+        </div>
+      ) : filteredMaterials.length ? (
         <div className="material-grid">
           {filteredMaterials.map((item) => (
             <MaterialCard key={item.id} material={item} onRequest={handleRequest} onApprove={handleApprove} />
@@ -155,8 +182,18 @@ export default function MaterialListings() {
         </div>
       ) : (
         <div className="panel-card text-center py-5">
-          <h4>No materials match your filters</h4>
-          <p className="text-muted">Try adjusting the search or selecting another category.</p>
+          <h4>No material listings available</h4>
+          <p className="text-muted">
+            {materials.length === 0
+              ? 'The exchange platform is ready with a clean database. Click "Add Listing" to publish the first industrial waste material.'
+              : 'No materials match your current filter parameters. Try resetting your search filters.'}
+          </p>
+          {materials.length === 0 && (
+            <Link to="/add-material" className="btn btn-primary-custom mt-2">
+              <PlusCircle size={16} className="me-2" />
+              Publish First Listing
+            </Link>
+          )}
         </div>
       )}
     </div>

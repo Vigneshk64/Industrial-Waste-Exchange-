@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BarChart3, Factory, FileText, LayoutDashboard, LogOut, MapPinned, PlusCircle, ShoppingCart, UserCircle2 } from 'lucide-react';
+import { BarChart3, Bot, Factory, HelpCircle, LayoutDashboard, LogOut, MapPinned, PlusCircle, ShoppingCart, UserCircle2 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { isSupabaseConfigured, supabase } from '../services/supabase';
 
@@ -13,7 +13,7 @@ const navItems = [
   { label: 'Profile', path: '/profile', icon: UserCircle2 },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ onOpenChat, onOpenHelp }) {
   const navigate = useNavigate();
   const [signOutError, setSignOutError] = useState('');
 
@@ -39,7 +39,7 @@ export default function Sidebar() {
         <div className="brand-mark">WE</div>
         <div className="brand-text">
           <h3>Waste Exchange</h3>
-          <small>Industrial Network</small>
+          <small>Circular Economy</small>
         </div>
       </div>
 
@@ -50,20 +50,36 @@ export default function Sidebar() {
             {label}
           </NavLink>
         ))}
+
+        <div style={{ margin: '14px 0 8px 12px', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255,255,255,0.45)' }}>
+          Assistance & Knowledge
+        </div>
+
+        <button
+          type="button"
+          className="nav-item"
+          onClick={onOpenChat}
+          style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', color: '#d8eedc' }}
+        >
+          <Bot size={18} color="#7ccaa2" />
+          AI Advisory Chatbot
+        </button>
+
+        <button
+          type="button"
+          className="nav-item"
+          onClick={onOpenHelp}
+          style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', color: '#d8eedc' }}
+        >
+          <HelpCircle size={18} color="#7ccaa2" />
+          Help & Guides
+        </button>
       </nav>
 
       <div className="sidebar-footer">
-        <strong>Operational summary</strong>
-        <div className="d-flex justify-content-between text-white-50 mb-2">
-          <span>Recovered</span>
-          <span>68.4 t</span>
-        </div>
-        <div className="progress-wrap">
-          <div className="progress-bar" style={{ width: '72%' }} />
-        </div>
-        <div className="mt-3 d-flex align-items-center gap-2 text-white-50">
-          <FileText size={16} />
-          Monthly impact report ready
+        <strong>SDG 9 & 12 Platform</strong>
+        <div className="small text-white-50 mt-1">
+          Zero-waste industrial symbiosis network
         </div>
         {signOutError ? <div className="inline-message error mt-3">{signOutError}</div> : null}
         <button className="btn btn-outline-light mt-3 w-100" type="button" onClick={handleSignOut}>

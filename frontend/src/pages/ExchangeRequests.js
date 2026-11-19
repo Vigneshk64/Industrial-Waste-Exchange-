@@ -1,20 +1,29 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { advanceRequest, getRequests, saveFeedback } from '../services/workflow';
+import { Link } from 'react-router-dom';
+import { advanceRequest, fetchRequests, saveFeedback } from '../services/workflow';
 
 const filters = ['All', 'Pending', 'Accepted', 'In Transit', 'Awaiting confirmation', 'Completed', 'Rejected'];
 const statusClasses = {
   Pending: 'warning',
+  pending: 'warning',
   Accepted: 'success',
+  accepted: 'success',
   'In Transit': 'info',
+  in_transit: 'info',
   'Awaiting confirmation': 'warning',
   Completed: 'success',
+  completed: 'success',
   Rejected: 'muted',
+  rejected: 'muted',
 };
 const nextAction = {
-  Pending: 'Review request',
-  Accepted: 'Confirm dispatch',
-  'In Transit': 'Confirm receipt',
-  'Awaiting confirmation': 'Confirm completion',
+  Pending: 'Confirm Accept',
+  pending: 'Confirm Accept',
+  Accepted: 'Confirm Dispatch',
+  accepted: 'Confirm Dispatch',
+  'In Transit': 'Confirm Delivery',
+  in_transit: 'Confirm Delivery',
+  'Awaiting confirmation': 'Confirm Completion',
 };
 
 export default function ExchangeRequests() {
@@ -23,28 +32,41 @@ export default function ExchangeRequests() {
   const [feedbackDrafts, setFeedbackDrafts] = useState({});
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadRequests = async () => {
     try {
-      setRequests(getRequests());
+      setLoading(true);
+      const data = await fetchRequests();
+      setRequests(data || []);
     } catch (error) {
       setMessageType('error');
       setMessage(error.message || 'Unable to load exchange requests.');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    loadRequests();
   }, []);
 
   const visibleRequests = useMemo(
-    () => activeFilter === 'All' ? requests : requests.filter((request) => request.status === activeFilter),
+    () => activeFilter === 'All'
+      ? requests
+      : requests.filter((request) => (request.status || '').toLowerCase() === activeFilter.toLowerCase()),
     [activeFilter, requests],
   );
-  const completedRequests = requests.filter((request) => request.status === 'Completed');
+  const completedRequests = requests.filter(
+    (request) => (request.status || '').toLowerCase() === 'completed'
+  );
 
-  const handleAdvance = (request) => {
+  const handleAdvance = async (request) => {
     try {
-      const updated = advanceRequest(request.id);
-      setRequests((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      const updated = await advanceRequest(request.id);
+      setRequests((current) => current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
       setMessageType('success');
-      setMessage(`Exchange ${request.material}: ${updated.status === 'Completed' ? 'both parties confirmed completion.' : `status updated to ${updated.status}.`}`);
+      setMessage(`Exchange for ${request.material_name || request.material}: status updated to ${updated.status}.`);
     } catch (error) {
       setMessageType('error');
       setMessage(error.message || 'Unable to update this request.');
@@ -58,14 +80,14 @@ export default function ExchangeRequests() {
     }));
   };
 
-  const handleFeedbackSubmit = (event, request) => {
+  const handleFeedbackSubmit = async (event, request) => {
     event.preventDefault();
     const draft = feedbackDrafts[request.id] || { rating: '5', comment: '' };
     try {
-      const updated = saveFeedback(request.id, draft.rating, draft.comment);
-      setRequests((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      const updated = await saveFeedback(request.id, draft.rating, draft.comment);
+      setRequests((current) => current.map((item) => (item.id === request.id ? { ...item, ...updated, rating: draft.rating, feedback: draft.comment } : item)));
       setMessageType('success');
-      setMessage('Feedback saved to the completed transaction record.');
+      setMessage('Feedback recorded to the completed transaction record.');
     } catch (error) {
       setMessageType('error');
       setMessage(error.message || 'Unable to save feedback.');
@@ -76,8 +98,8 @@ export default function ExchangeRequests() {
     <div>
       <div className="page-header">
         <div>
-          <h2>Exchange requests</h2>
-          <p>Review interest, coordinate transfer, confirm completion, and record feedback.</p>
+          <h2>Exchange Requests</h2>
+          <p>Coordinate industrial material transfer, confirm dispatch and receipt, and track circular transactions.</p>
         </div>
       </div>
 
@@ -105,7 +127,7 @@ export default function ExchangeRequests() {
             <thead>
               <tr>
                 <th>Material</th>
-                <th>Supplier / Buyer</th>
+                <th>Supplier / Seeker</th>
                 <th>Quantity</th>
                 <th>Date</th>
                 <th>Price</th>
@@ -114,34 +136,38 @@ export default function ExchangeRequests() {
               </tr>
             </thead>
             <tbody>
-              {visibleRequests.length ? visibleRequests.map((request) => (
+              {loading ? (
+                <tr><td colSpan="7" className="text-center py-4 text-muted">Loading requests...</td></tr>
+              ) : visibleRequests.length ? visibleRequests.map((request) => (
                 <React.Fragment key={request.id}>
                   <tr>
-                    <td>{request.material}</td>
-                    <td>{request.supplier} / {request.buyer}</td>
-                    <td>{request.quantity}</td>
-                    <td>{request.date}</td>
-                    <td>{request.price}</td>
+                    <td><strong>{request.material_name || request.material}</strong></td>
+                    <td>{request.supplier_name || request.supplier} / {request.seeker_name || request.buyer}</td>
+                    <td>{request.quantity_requested || request.quantity}</td>
+                    <td>{request.date || (request.created_at ? new Date(request.created_at).toLocaleDateString() : 'Today')}</td>
+                    <td>{request.price || (request.offered_price ? `₹${request.offered_price}` : 'Negotiable')}</td>
                     <td>
-                      <span className={`badge ${statusClasses[request.status] || 'muted'}`}>{request.status}</span>
+                      <span className={`badge ${statusClasses[request.status] || 'muted'}`}>
+                        {request.status}
+                      </span>
                     </td>
                     <td>
                       {nextAction[request.status] ? (
                         <button type="button" className="btn btn-outline-custom btn-sm" onClick={() => handleAdvance(request)}>
                           {nextAction[request.status]}
                         </button>
-                      ) : request.status === 'Completed' && !request.rating ? (
+                      ) : (request.status || '').toLowerCase() === 'completed' && !request.rating ? (
                         <span className="text-muted small">Feedback needed</span>
-                      ) : request.status === 'Completed' ? (
-                        <span className="text-success small">Recorded</span>
+                      ) : (request.status || '').toLowerCase() === 'completed' ? (
+                        <span className="text-success small">Completed & Rated</span>
                       ) : <span className="text-muted small">No action</span>}
                     </td>
                   </tr>
-                  {request.status === 'Completed' && !request.rating ? (
+                  {(request.status || '').toLowerCase() === 'completed' && !request.rating ? (
                     <tr key={`${request.id}-feedback`}>
                       <td colSpan="7">
                         <form className="feedback-form" onSubmit={(event) => handleFeedbackSubmit(event, request)}>
-                          <strong>Rate {request.material} exchange</strong>
+                          <strong>Rate {request.material_name || request.material} exchange</strong>
                           <div className="feedback-fields">
                             <label>
                               Rating
@@ -150,23 +176,23 @@ export default function ExchangeRequests() {
                                 value={(feedbackDrafts[request.id] || {}).rating || '5'}
                                 onChange={(event) => handleFeedbackChange(request.id, 'rating', event.target.value)}
                               >
-                                <option value="5">5 - Excellent</option>
+                                <option value="5">5 - Excellent (Purity & schedule met)</option>
                                 <option value="4">4 - Good</option>
                                 <option value="3">3 - Average</option>
-                                <option value="2">2 - Poor</option>
-                                <option value="1">1 - Very poor</option>
+                                <option value="2">2 - Below standard</option>
+                                <option value="1">1 - Defective batch</option>
                               </select>
                             </label>
                             <label>
-                              Feedback
+                              Quality / Logistics Remarks
                               <input
                                 className="form-control"
                                 value={(feedbackDrafts[request.id] || {}).comment || ''}
                                 onChange={(event) => handleFeedbackChange(request.id, 'comment', event.target.value)}
-                                placeholder="Share your experience"
+                                placeholder="Verification feedback for industrial ledger"
                               />
                             </label>
-                            <button type="submit" className="btn btn-primary-custom">Save feedback</button>
+                            <button type="submit" className="btn btn-primary-custom">Save Feedback</button>
                           </div>
                         </form>
                       </td>
@@ -174,7 +200,16 @@ export default function ExchangeRequests() {
                   ) : null}
                 </React.Fragment>
               )) : (
-                <tr><td colSpan="7" className="text-center py-4 text-muted">No requests in this status.</td></tr>
+                <tr>
+                  <td colSpan="7" className="text-center py-5 text-muted">
+                    No exchange requests recorded yet.
+                    <div className="mt-2">
+                      <Link to="/materials" className="btn btn-outline-custom btn-sm">
+                        Browse Materials & Request Exchange
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -183,24 +218,28 @@ export default function ExchangeRequests() {
 
       <section className="panel-card mt-4">
         <div className="panel-header">
-          <h3>Transaction records</h3>
-          <span className="chip">{completedRequests.length} completed</span>
+          <h3>Completed Transaction Ledger</h3>
+          <span className="chip">{completedRequests.length} verified completed</span>
         </div>
         {completedRequests.length ? (
           <div className="data-list">
             {completedRequests.map((request) => (
               <div className="list-row" key={request.id}>
                 <div className="list-meta">
-                  <strong>{request.material}</strong>
-                  <span className="text-muted small">{request.supplier} / {request.buyer} · {request.quantity}</span>
+                  <strong>{request.material_name || request.material}</strong>
+                  <span className="text-muted small">
+                    {request.supplier_name || request.supplier} → {request.seeker_name || request.buyer} · {request.quantity_requested || request.quantity}
+                  </span>
                 </div>
                 <span className="text-muted small">
-                  {request.rating ? `${request.rating}/5 rating` : 'Awaiting feedback'}
+                  {request.rating ? `${request.rating}/5 rating • Verified` : 'Awaiting feedback rating'}
                 </span>
               </div>
             ))}
           </div>
-        ) : <p className="text-muted mb-0">Completed exchanges and ratings will appear here.</p>}
+        ) : (
+          <p className="text-muted mb-0">Completed exchanges, verified weights, and ratings will appear here as transactions complete.</p>
+        )}
       </section>
     </div>
   );

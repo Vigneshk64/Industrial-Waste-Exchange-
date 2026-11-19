@@ -58,7 +58,7 @@ export default function RegisterPage() {
     setIsLoading(true);
 
     try {
-      const { error: signUpError } = await supabase.auth.signUp({
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,
         options: {
@@ -74,7 +74,20 @@ export default function RegisterPage() {
       });
 
       if (signUpError) throw signUpError;
-      setMessage('Account created successfully. Check your email to confirm registration.');
+
+      // If user session returned immediately (auto-confirm enabled), create company profile
+      if (signUpData?.user) {
+        try {
+          await supabase.from('companies').insert([{
+            user_id: signUpData.user.id,
+            name: form.company,
+            industry_type: form.industry,
+            description: `Registered partner: ${form.role} based in ${form.location}.`,
+          }]);
+        } catch {}
+      }
+
+      setMessage('Account created successfully! Check your email to confirm registration or sign in directly.');
       setTimeout(() => navigate('/login'), 1500);
     } catch (signUpErr) {
       setError(signUpErr.message || 'Signup failed. Please try again.');
