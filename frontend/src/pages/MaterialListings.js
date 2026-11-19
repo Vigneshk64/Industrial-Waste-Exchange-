@@ -21,23 +21,31 @@ export default function MaterialListings() {
     (item) => (item.status === 'Pending review' || item.availability_status === 'pending_review')
   );
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const listings = await fetchListings();
-      setMaterials(listings || []);
-      if (reviewId && listings.some((listing) => listing.id === reviewId)) {
-        setMessage('Your listing is awaiting review. Approve it to publish it for seekers.');
-      }
-    } catch (error) {
-      setLoadError(error.message || 'Unable to load material listings.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    let isActive = true;
+
+    async function loadData() {
+      try {
+        setLoading(true);
+        const listings = await fetchListings();
+        if (!isActive) return;
+        setMaterials(listings || []);
+        if (reviewId && listings.some((listing) => listing.id === reviewId)) {
+          setMessage('Your listing is awaiting review. Approve it to publish it for seekers.');
+        }
+      } catch (error) {
+        if (!isActive) return;
+        setLoadError(error.message || 'Unable to load material listings.');
+      } finally {
+        if (isActive) setLoading(false);
+      }
+    }
+
     loadData();
+
+    return () => {
+      isActive = false;
+    };
   }, [reviewId]);
 
   useEffect(() => {

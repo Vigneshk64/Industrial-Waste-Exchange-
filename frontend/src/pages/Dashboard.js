@@ -26,12 +26,10 @@ export default function Dashboard() {
     waste_reused_tonnes: '0.00',
     cost_savings_inr: 0,
   });
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        setLoading(true);
         const [listingsData, requestsData] = await Promise.all([
           fetchListings(),
           fetchRequests(),
@@ -62,8 +60,6 @@ export default function Dashboard() {
         });
       } catch (err) {
         console.error('Error loading dashboard', err);
-      } finally {
-        setLoading(false);
       }
     }
 

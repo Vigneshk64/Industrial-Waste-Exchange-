@@ -34,21 +34,29 @@ export default function ExchangeRequests() {
   const [messageType, setMessageType] = useState('success');
   const [loading, setLoading] = useState(true);
 
-  const loadRequests = async () => {
-    try {
-      setLoading(true);
-      const data = await fetchRequests();
-      setRequests(data || []);
-    } catch (error) {
-      setMessageType('error');
-      setMessage(error.message || 'Unable to load exchange requests.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    let isActive = true;
+
+    const loadRequests = async () => {
+      try {
+        setLoading(true);
+        const data = await fetchRequests();
+        if (!isActive) return;
+        setRequests(data || []);
+      } catch (error) {
+        if (!isActive) return;
+        setMessageType('error');
+        setMessage(error.message || 'Unable to load exchange requests.');
+      } finally {
+        if (isActive) setLoading(false);
+      }
+    };
+
     loadRequests();
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   const visibleRequests = useMemo(

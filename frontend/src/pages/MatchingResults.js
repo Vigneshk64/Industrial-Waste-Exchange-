@@ -81,35 +81,44 @@ export default function MatchingResults() {
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
 
-  const loadMatches = async () => {
-    try {
-      setLoading(true);
-      // Try backend matching API
-      let liveMatches = [];
-      try {
-        liveMatches = await getMatches();
-      } catch {}
-
-      if (Array.isArray(liveMatches) && liveMatches.length > 0) {
-        setMatches(liveMatches);
-      } else {
-        // Compute dynamically from active listings & requirements
-        const [listings, requirements] = await Promise.all([
-          fetchListings(),
-          fetchRequirements(),
-        ]);
-        const computed = computeLocalMatches(listings, requirements);
-        setMatches(computed);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    let isActive = true;
+
+    const loadMatches = async () => {
+      try {
+        setLoading(true);
+        // Try backend matching API
+        let liveMatches = [];
+        try {
+          liveMatches = await getMatches();
+        } catch {}
+
+        if (!isActive) return;
+
+        if (Array.isArray(liveMatches) && liveMatches.length > 0) {
+          setMatches(liveMatches);
+        } else {
+          // Compute dynamically from active listings & requirements
+          const [listings, requirements] = await Promise.all([
+            fetchListings(),
+            fetchRequirements(),
+          ]);
+          if (!isActive) return;
+          const computed = computeLocalMatches(listings, requirements);
+          setMatches(computed);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (isActive) setLoading(false);
+      }
+    };
+
     loadMatches();
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   const handleRequest = (match, details) => {

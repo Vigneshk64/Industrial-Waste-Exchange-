@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, MessageSquare, Send, Sparkles, X } from 'lucide-react';
+import { Bot, Send, Sparkles, X } from 'lucide-react';
 import { askChatbot } from '../services/api';
 
 export default function AIChatbotModal({ isOpen, onClose }) {
