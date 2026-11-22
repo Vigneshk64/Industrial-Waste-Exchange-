@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { advanceRequest, fetchRequests, saveFeedback } from '../services/workflow';
+import { getRequestHistory, respondToRequest, updateRequestStatus } from '../services/api';
 
-const filters = ['All', 'Pending', 'Accepted', 'In Transit', 'Awaiting confirmation', 'Completed', 'Rejected'];
+const filters = ['All', 'Pending', 'Accepted', 'In Transit', 'Completed', 'Rejected'];
 const statusClasses = {
   Pending: 'warning',
   pending: 'warning',
@@ -10,7 +11,6 @@ const statusClasses = {
   accepted: 'success',
   'In Transit': 'info',
   in_transit: 'info',
-  'Awaiting confirmation': 'warning',
   Completed: 'success',
   completed: 'success',
   Rejected: 'muted',
@@ -23,11 +23,16 @@ const nextAction = {
   accepted: 'Confirm Dispatch',
   'In Transit': 'Confirm Delivery',
   in_transit: 'Confirm Delivery',
-  'Awaiting confirmation': 'Confirm Completion',
 };
 
 export default function ExchangeRequests() {
+  const [searchParams] = useSearchParams();
   const [requests, setRequests] = useState([]);
+  const [direction, setDirection] = useState('incoming');
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [supplierResponse, setSupplierResponse] = useState('');
+  const [statusHistory, setStatusHistory] = useState([]);
+  const [historyError, setHistoryError] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
   const [feedbackDrafts, setFeedbackDrafts] = useState({});
   const [message, setMessage] = useState('');
@@ -59,12 +64,21 @@ export default function ExchangeRequests() {
     };
   }, []);
 
-  const visibleRequests = useMemo(
-    () => activeFilter === 'All'
-      ? requests
-      : requests.filter((request) => (request.status || '').toLowerCase() === activeFilter.toLowerCase()),
-    [activeFilter, requests],
-  );
+  useEffect(() => {
+    const requestId = searchParams.get('request');
+    if (!requestId) return;
+    const request = requests.find((item) => item.id === requestId);
+    if (!request) return;
+    setDirection(request.is_incoming ? 'incoming' : 'outgoing');
+    setSelectedRequest(request);
+    setSupplierResponse(request.supplier_response || '');
+  }, [requests, searchParams]);
+
+  const visibleRequests = useMemo(() => requests
+    .filter((request) => direction === 'incoming' ? request.is_incoming : !request.is_incoming)
+    .filter((request) => activeFilter === 'All'
+      || (request.status || '').toLowerCase() === activeFilter.toLowerCase().replace(' ', '_')),
+  [activeFilter, direction, requests]);
   const completedRequests = requests.filter(
     (request) => (request.status || '').toLowerCase() === 'completed'
   );
@@ -80,6 +94,43 @@ export default function ExchangeRequests() {
       setMessage(error.message || 'Unable to update this request.');
     }
   };
+
+  const handleStatusChange = async (request, status) => {
+    try {
+      const updated = await updateRequestStatus(request.id, status);
+      setRequests((current) => current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+      setMessageType('success');
+      setMessage(`Request ${status}.`);
+    } catch (error) {
+      setMessageType('error');
+      setMessage(error.message || `Unable to ${status} this request.`);
+    }
+  };
+
+  const handleSupplierResponse = async (event) => {
+    event.preventDefault();
+    try {
+      const updated = await respondToRequest(selectedRequest.id, supplierResponse);
+      setRequests((current) => current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+      setSelectedRequest((current) => ({ ...current, ...updated }));
+      setMessageType('success');
+      setMessage('Response sent to the buyer.');
+    } catch (error) {
+      setMessageType('error');
+      setMessage(error.message || 'Unable to send a response.');
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedRequest) return undefined;
+    let active = true;
+    setStatusHistory([]);
+    setHistoryError('');
+    getRequestHistory(selectedRequest.id)
+      .then((history) => { if (active) setStatusHistory(history); })
+      .catch((error) => { if (active) setHistoryError(error.message || 'Unable to load request history.'); });
+    return () => { active = false; };
+  }, [selectedRequest?.id]);
 
   const handleFeedbackChange = (id, field, value) => {
     setFeedbackDrafts((current) => ({
@@ -107,13 +158,22 @@ export default function ExchangeRequests() {
       <div className="page-header">
         <div>
           <h2>Exchange Requests</h2>
-          <p>Coordinate industrial material transfer, confirm dispatch and receipt, and track circular transactions.</p>
+          <p>Review incoming buyer interest and track the requests your company has sent.</p>
         </div>
       </div>
 
       {message ? <div className={`inline-message ${messageType}`}>{message}</div> : null}
 
       <div className="panel-card mb-4">
+        <div className="chip-list mb-3" role="tablist" aria-label="Request direction">
+          {['incoming', 'outgoing'].map((tab) => (
+            <button type="button" role="tab" aria-selected={direction === tab} key={tab}
+              className={`chip ${direction === tab ? 'active' : ''}`}
+              onClick={() => { setDirection(tab); setActiveFilter('All'); }}>
+              {tab === 'incoming' ? 'Incoming Requests' : 'Outgoing Requests'}
+            </button>
+          ))}
+        </div>
         <div className="chip-list">
           {filters.map((filter) => (
             <button
@@ -131,14 +191,14 @@ export default function ExchangeRequests() {
 
       <div className="panel-card">
         <div className="table-responsive">
-          <table className="table align-middle">
+          <table className="table align-middle requests-table">
             <thead>
               <tr>
                 <th>Material</th>
-                <th>Supplier / Seeker</th>
+                <th>{direction === 'incoming' ? 'Buyer company' : 'Supplier company'}</th>
                 <th>Quantity</th>
                 <th>Date</th>
-                <th>Price</th>
+                <th>Offer</th>
                 <th>Status</th>
                 <th>Action</th>
               </tr>
@@ -148,31 +208,43 @@ export default function ExchangeRequests() {
                 <tr><td colSpan="7" className="text-center py-4 text-muted">Loading requests...</td></tr>
               ) : visibleRequests.length ? visibleRequests.map((request) => (
                 <React.Fragment key={request.id}>
-                  <tr>
-                    <td><strong>{request.material_name || request.material}</strong></td>
-                    <td>{request.supplier_name || request.supplier} / {request.seeker_name || request.buyer}</td>
-                    <td>{request.quantity_requested || request.quantity}</td>
-                    <td>{request.date || (request.created_at ? new Date(request.created_at).toLocaleDateString() : 'Today')}</td>
-                    <td>{request.price || (request.offered_price ? `₹${request.offered_price}` : 'Negotiable')}</td>
-                    <td>
-                      <span className={`badge ${statusClasses[request.status] || 'muted'}`}>
-                        {request.status}
+                  <tr className="request-table-row">
+                    <td data-label="Material"><strong>{request.material_name || request.listing?.title || request.material}</strong></td>
+                    <td data-label={direction === 'incoming' ? 'Buyer company' : 'Supplier company'}>{direction === 'incoming'
+                      ? request.buyer_company?.name || request.seeker_name
+                      : <>{request.supplier_company?.name || request.supplier_name}
+                        {request.supplier_response ? <div className="text-muted small">Response: {request.supplier_response}</div> : null}
+                      </>}</td>
+                    <td data-label="Quantity">{request.quantity_requested} {request.listing?.unit || ''}</td>
+                    <td data-label="Date">{request.created_at ? new Date(request.created_at).toLocaleDateString() : '—'}</td>
+                    <td data-label="Offer">{request.offered_price ? `₹${request.offered_price}` : 'Not specified'}</td>
+                    <td data-label="Status">
+                      <span className={`badge ${statusClasses[request.status] || statusClasses[String(request.status || '').toLowerCase()] || 'muted'}`}>
+                        {String(request.status || '').replace('_', ' ')}
                       </span>
                     </td>
-                    <td>
-                      {nextAction[request.status] ? (
-                        <button type="button" className="btn btn-outline-custom btn-sm" onClick={() => handleAdvance(request)}>
-                          {nextAction[request.status]}
-                        </button>
-                      ) : (request.status || '').toLowerCase() === 'completed' && !request.rating ? (
-                        <span className="text-muted small">Feedback needed</span>
-                      ) : (request.status || '').toLowerCase() === 'completed' ? (
-                        <span className="text-success small">Completed & Rated</span>
-                      ) : <span className="text-muted small">No action</span>}
+                    <td data-label="Actions">
+                      <div className="request-table-actions">
+                        <button type="button" className="btn btn-outline-custom btn-sm" onClick={() => { setSelectedRequest(request); setSupplierResponse(request.supplier_response || ''); }}>View details</button>
+                        {direction === 'incoming' && ['pending', 'accepted'].includes(request.status) ? (
+                          <button type="button" className="btn btn-outline-custom btn-sm" onClick={() => { setSelectedRequest(request); setSupplierResponse(request.supplier_response || ''); }}>Respond to buyer</button>
+                        ) : null}
+                        {direction === 'incoming' && nextAction[request.status] ? (
+                          <button type="button" className="btn btn-outline-custom btn-sm" onClick={() => handleAdvance(request)}>
+                            {nextAction[request.status]}
+                          </button>
+                        ) : null}
+                        {direction === 'incoming' && request.status === 'pending' ? (
+                          <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleStatusChange(request, 'rejected')}>Reject</button>
+                        ) : null}
+                        {direction === 'outgoing' && request.status === 'pending' ? (
+                          <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => handleStatusChange(request, 'cancelled')}>Cancel request</button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                   {(request.status || '').toLowerCase() === 'completed' && !request.rating ? (
-                    <tr key={`${request.id}-feedback`}>
+                    <tr className="request-feedback-row" key={`${request.id}-feedback`}>
                       <td colSpan="7">
                         <form className="feedback-form" onSubmit={(event) => handleFeedbackSubmit(event, request)}>
                           <strong>Rate {request.material_name || request.material} exchange</strong>
@@ -210,7 +282,7 @@ export default function ExchangeRequests() {
               )) : (
                 <tr>
                   <td colSpan="7" className="text-center py-5 text-muted">
-                    No exchange requests recorded yet.
+                    No {direction} requests recorded yet.
                     <div className="mt-2">
                       <Link to="/materials" className="btn btn-outline-custom btn-sm">
                         Browse Materials & Request Exchange
@@ -223,6 +295,51 @@ export default function ExchangeRequests() {
           </table>
         </div>
       </div>
+
+      {selectedRequest ? (
+        <div className="modal-backdrop-custom" role="presentation" onClick={() => setSelectedRequest(null)}>
+          <section className="panel-card request-detail-modal" role="dialog" aria-modal="true" aria-labelledby="request-detail-title" onClick={(event) => event.stopPropagation()}>
+            <div className="panel-header">
+              <h3 id="request-detail-title">Request details</h3>
+              <button type="button" className="btn btn-outline-custom btn-sm" onClick={() => setSelectedRequest(null)}>Close</button>
+            </div>
+            <dl className="request-detail-list">
+              <dt>Material</dt><dd>{selectedRequest.listing?.title || selectedRequest.material_name}</dd>
+              <dt>Buyer</dt><dd>{selectedRequest.buyer_company?.name || selectedRequest.seeker_name || 'Not available'}</dd>
+              <dt>Supplier</dt><dd>{selectedRequest.supplier_company?.name || selectedRequest.supplier_name || 'Not available'}</dd>
+              <dt>Requested quantity</dt><dd>{selectedRequest.quantity_requested} {selectedRequest.listing?.unit || ''}</dd>
+              <dt>Listing quantity</dt><dd>{selectedRequest.listing?.quantity ?? 'Not available'} {selectedRequest.listing?.unit || ''}</dd>
+              <dt>Buyer message</dt><dd>{selectedRequest.message || 'No message provided.'}</dd>
+              <dt>Supplier response</dt><dd>{selectedRequest.supplier_response || 'No supplier response yet.'}</dd>
+              <dt>Status</dt><dd>{String(selectedRequest.status || '').replace('_', ' ')}</dd>
+              <dt>Created</dt><dd>{selectedRequest.created_at ? new Date(selectedRequest.created_at).toLocaleString() : 'Not available'}</dd>
+              <dt>Last updated</dt><dd>{selectedRequest.updated_at ? new Date(selectedRequest.updated_at).toLocaleString() : 'Not available'}</dd>
+            </dl>
+            {direction === 'incoming' && ['pending', 'accepted'].includes(selectedRequest.status) ? (
+              <form className="mt-3" onSubmit={handleSupplierResponse}>
+                <label className="form-label" htmlFor="supplier-response">Respond to buyer</label>
+                <textarea id="supplier-response" className="form-control" rows="3" maxLength="2000"
+                  value={supplierResponse} onChange={(event) => setSupplierResponse(event.target.value)} required />
+                <button type="submit" className="btn btn-primary-custom btn-sm mt-2">Send response</button>
+              </form>
+            ) : null}
+            <h4 className="mt-4">Status history</h4>
+            {historyError ? <p role="alert" className="text-muted small">{historyError}</p> : statusHistory.length ? (
+              <div className="timeline">
+                {statusHistory.map((entry) => (
+                  <div className="timeline-item" key={entry.id}>
+                    <div className="timeline-dot" />
+                    <div>
+                      <strong>{entry.old_status ? `${entry.old_status} → ` : ''}{entry.new_status}</strong>
+                      <div className="text-muted small">{entry.actor_company_name || 'Platform'} · {new Date(entry.changed_at).toLocaleString()}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : !historyError ? <p className="text-muted small mb-0">No status changes recorded.</p> : null}
+          </section>
+        </div>
+      ) : null}
 
       <section className="panel-card mt-4">
         <div className="panel-header">

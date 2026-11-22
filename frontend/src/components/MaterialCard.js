@@ -1,25 +1,38 @@
 import { useState } from 'react';
 import { ArrowUpRight, MapPin, Package2, Tag } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import ReportForm from './ReportForm';
 
-export default function MaterialCard({ material, onRequest, onApprove }) {
+export default function MaterialCard({ material, onRequest, onDelete, onAvailabilityChange }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [showCompany, setShowCompany] = useState(false);
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [quantity, setQuantity] = useState('');
   const [message, setMessage] = useState('');
   const [requestError, setRequestError] = useState('');
-  const statusClass = material.status === 'Available'
+  const name = material.name || material.title || 'Material listing';
+  const category = material.category || material.category_name || 'Uncategorized';
+  const grade = material.grade || material.quality_grade || 'Standard';
+  const supplier = material.supplier_company;
+  const company = supplier?.name || material.company || material.company_name || 'Supplier details unavailable';
+  const status = material.status || material.availability_status || 'Available';
+  const quantityLabel = typeof material.quantity === 'number'
+    ? `${material.quantity} ${material.unit || 'kg'}`
+    : material.quantity;
+  const price = material.price ?? material.price_per_unit;
+  const statusClass = status === 'Available' || status === 'available' || status === 'active'
     ? 'success'
-    : material.status === 'Pending review'
+    : status === 'Pending review' || status === 'pending_review'
       ? 'info'
-      : material.status === 'Reserved'
+      : status === 'Reserved' || status === 'booked'
         ? 'warning'
         : 'muted';
 
-  const handleRequest = (event) => {
+  const handleRequest = async (event) => {
     event.preventDefault();
     setRequestError('');
     try {
-      onRequest(material, { quantity, message });
+      await onRequest(material, { quantity, message });
       setShowRequestForm(false);
       setQuantity('');
       setMessage('');
@@ -30,38 +43,56 @@ export default function MaterialCard({ material, onRequest, onApprove }) {
 
   return (
     <article className="material-card">
+      {material.images?.[0] ? <img className="listing-photo" src={material.images[0]} alt={`${name} listing`} /> : null}
       <div className="d-flex justify-content-between align-items-start mb-2">
         <div>
-          <h4>{material.name}</h4>
+          <h4>{name}</h4>
           <div className="meta">
-            <span className="meta-badge">{material.category}</span>
-            <span className="meta-badge">{material.grade}</span>
+            <span className="meta-badge">{category}</span>
+            <span className="meta-badge">{grade}</span>
           </div>
         </div>
         <span className={`badge ${statusClass}`}>
-          {material.status}
+          {status}
         </span>
       </div>
 
+      {material.description ? <p className="listing-description">{material.description}</p> : null}
       <div className="d-flex align-items-center gap-2 text-muted mb-2">
         <MapPin size={15} />
         <span>{material.location}</span>
       </div>
 
       <div className="d-flex justify-content-between text-muted small mb-2">
-        <span className="d-flex align-items-center gap-2"><Package2 size={14} /> {material.quantity}</span>
-        <span className="d-flex align-items-center gap-2"><Tag size={14} /> ₹{material.price}</span>
+        <span className="d-flex align-items-center gap-2"><Package2 size={14} /> {quantityLabel}</span>
+        <span className="d-flex align-items-center gap-2"><Tag size={14} /> {price === null || price === undefined ? 'Price on request' : `₹${price} / ${material.unit || 'unit'}`}</span>
       </div>
+      {material.available_from ? <p className="text-muted small mb-2">Available from {material.available_from}</p> : null}
 
-      <p className="text-muted small mb-3">Provided by {material.company}</p>
+      <p className="text-muted small mb-3">Provided by {company}</p>
+      {supplier ? (
+        <button type="button" className="btn btn-link btn-sm p-0" onClick={() => setShowCompany((current) => !current)}>
+          {showCompany ? 'Hide company profile' : 'View company profile'}
+        </button>
+      ) : null}
+      {showCompany && supplier ? (
+        <div className="listing-details">
+          <strong>{supplier.name}</strong>
+          <p className="mb-1">{supplier.industry_type || 'Business category not provided'}</p>
+          <p className="mb-1">{supplier.location || 'Business location not provided'}</p>
+          <p className="mb-1">Platform status: {supplier.account_status || 'Not available'}</p>
+          <p className="mb-0">Verification: Not tracked in the current company profile.</p>
+        </div>
+      ) : null}
 
       {showDetails ? (
         <div className="listing-details">
           <p>{material.description || 'No additional material details have been provided.'}</p>
-          {material.pickup ? <p><strong>Collection:</strong> {material.pickup}</p> : null}
-          {material.date ? <p><strong>Available from:</strong> {material.date}</p> : null}
-          {material.notes ? <p><strong>Handling:</strong> {material.notes}</p> : null}
-          {material.imageName ? <p><strong>Image:</strong> {material.imageName}</p> : null}
+          {material.available_from ? <p><strong>Available from:</strong> {material.available_from}</p> : null}
+          {material.safety_notes ? <p><strong>Handling:</strong> {material.safety_notes}</p> : null}
+          {material.images?.length ? material.images.map((image) => (
+            <img key={image} className="listing-photo" src={image} alt={`${name} material`} />
+          )) : null}
         </div>
       ) : null}
 
@@ -97,17 +128,35 @@ export default function MaterialCard({ material, onRequest, onApprove }) {
         <button type="button" className="btn btn-outline-custom btn-sm" onClick={() => setShowDetails((current) => !current)}>
           {showDetails ? 'Hide Details' : 'View Details'}
         </button>
-        {material.status === 'Pending review' ? (
-          <button type="button" className="btn btn-primary-custom btn-sm" onClick={() => onApprove(material)}>
-            Approve &amp; publish
-          </button>
-        ) : material.status === 'Available' ? (
+        {material.is_mine ? (
+          <>
+            <Link to={`/add-material?edit=${encodeURIComponent(material.id)}`} className="btn btn-outline-custom btn-sm">Edit</Link>
+            {onAvailabilityChange ? (
+              <>
+                <label className="visually-hidden" htmlFor={`availability-${material.id}`}>Manage availability for {name}</label>
+                <select
+                  id={`availability-${material.id}`}
+                  className="form-select form-select-sm availability-select"
+                  value={material.availability_status || 'available'}
+                  onChange={(event) => onAvailabilityChange(material, event.target.value)}
+                >
+                  <option value="available">Available</option>
+                  <option value="booked">Reserved</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </>
+            ) : null}
+            {onDelete ? <button type="button" className="btn btn-outline-danger btn-sm" onClick={() => onDelete(material)}>Delete</button> : null}
+          </>
+        ) : (status === 'Available' || status === 'available' || status === 'active') ? (
           <button type="button" className="btn btn-primary-custom btn-sm" onClick={() => setShowRequestForm((current) => !current)}>
             Send interest
             <ArrowUpRight size={14} className="ms-2" />
           </button>
         ) : null}
       </div>
+      {!material.is_mine && material.id ? <ReportForm targetType="listing" targetId={material.id} targetName={name} /> : null}
+      {!material.is_mine && material.provider_id ? <ReportForm targetType="company" targetId={material.provider_id} targetName={company} /> : null}
     </article>
   );
 }

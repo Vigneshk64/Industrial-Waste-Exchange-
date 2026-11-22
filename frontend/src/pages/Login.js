@@ -32,13 +32,19 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email: form.email,
         password: form.password,
       });
 
       if (signInError) throw signInError;
-      navigate('/dashboard');
+
+      const role = data.user?.app_metadata?.role || 'company';
+      if (role !== 'admin' && role !== 'company') {
+        await supabase.auth.signOut();
+        throw new Error('This account does not have an authorized role.');
+      }
+      navigate(role === 'admin' ? '/admin' : '/dashboard');
     } catch (signinErr) {
       setError(signinErr.message || 'Unable to log in. Please try again.');
     } finally {

@@ -57,6 +57,7 @@ function computeLocalMatches(listings = [], requirements = []) {
       if (score >= 35) {
         matches.push({
           id: `match-${listing.id}-${req.id}`,
+          listing_id: listing.id,
           material: listing.title || listing.name,
           category: listing.category || listing.category_name,
           quantity: `${listing.quantity} ${listing.unit || 'kg'} available`,
@@ -121,10 +122,10 @@ export default function MatchingResults() {
     };
   }, []);
 
-  const handleRequest = (match, details) => {
+  const handleRequest = async (match, details) => {
     try {
-      createRequest({
-        id: match.id,
+      await createRequest({
+        id: match.listing_id || match.id,
         name: match.material,
         status: 'Available',
         company: match.company,

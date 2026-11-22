@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { saveListing, saveRequirement } from '../services/workflow';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { fetchListings, saveListing, saveRequirement } from '../services/workflow';
 
 const defaultForm = {
   name: '',
@@ -19,10 +19,49 @@ const defaultForm = {
 
 export default function AddMaterial() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const editingId = searchParams.get('edit');
   const [mode, setMode] = useState('provider'); // 'provider' = Available Waste, 'seeker' = Required Raw Material
   const [form, setForm] = useState(defaultForm);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState('success');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingListing, setIsLoadingListing] = useState(Boolean(editingId));
+  const [listingLoadFailed, setListingLoadFailed] = useState(false);
+
+  useEffect(() => {
+    if (!editingId) return undefined;
+    let active = true;
+    fetchListings({ mine: true })
+      .then((listings) => {
+        const listing = listings.find((item) => item.id === editingId);
+        if (!listing) throw new Error('Listing not found or not owned by your company.');
+        if (active) {
+          setForm({
+            ...defaultForm,
+            name: listing.name || listing.title || '',
+            category: listing.category || listing.category_name || 'Plastic',
+            description: listing.description || '',
+            quantity: String(listing.quantity ?? ''),
+            unit: listing.unit || 'kg',
+            grade: listing.grade || listing.quality_grade || '',
+            price: String(listing.price ?? listing.price_per_unit ?? ''),
+            location: listing.location || '',
+            date: listing.available_from || '',
+            notes: listing.safety_notes || '',
+          });
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setListingLoadFailed(true);
+          setMessageType('error');
+          setMessage(error.message || 'Unable to load this listing.');
+        }
+      })
+      .finally(() => { if (active) setIsLoadingListing(false); });
+    return () => { active = false; };
+  }, [editingId]);
 
   // Auto-load a saved draft (if present) when the component mounts
   useEffect(() => {
@@ -87,8 +126,9 @@ export default function AddMaterial() {
     }
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
+    if (isSubmitting) return;
     const requiredFields = [form.name, form.category, form.quantity, form.location];
     const hasEmptyRequired = requiredFields.some((value) => !String(value || '').trim());
 
@@ -98,15 +138,16 @@ export default function AddMaterial() {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       if (mode === 'provider') {
-        const listing = saveListing(form);
+        await saveListing(form, editingId);
         localStorage.removeItem('addMaterialDraft_provider');
         setMessageType('success');
-        setMessage('Waste listing published successfully.');
-        setTimeout(() => navigate(`/materials?review=${encodeURIComponent(listing.id)}`), 800);
+        setMessage(editingId ? 'Listing updated successfully.' : 'Waste listing published successfully.');
+        setTimeout(() => navigate('/materials'), 500);
       } else {
-        saveRequirement(form);
+        await saveRequirement(form);
         localStorage.removeItem('addMaterialDraft_seeker');
         setMessageType('success');
         setMessage('Raw material requirement registered. Checking dynamic matches...');
@@ -116,6 +157,8 @@ export default function AddMaterial() {
       console.error('Submission error', error);
       setMessageType('error');
       setMessage(error.message || 'Unable to publish.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -123,14 +166,14 @@ export default function AddMaterial() {
     <div>
       <div className="page-header">
         <div>
-          <h2>{mode === 'provider' ? 'List Available Waste Material' : 'Post Required Raw Material'}</h2>
+          <h2>{editingId ? 'Edit material listing' : mode === 'provider' ? 'List Available Waste Material' : 'Post Required Raw Material'}</h2>
           <p>
             {mode === 'provider'
               ? 'Publish industrial surplus, by-products, or recyclable waste for circular exchange partners.'
               : 'Specify raw materials needed by your plant to automatically match with industrial waste suppliers.'}
           </p>
         </div>
-        <div className="btn-group">
+        {!editingId ? <div className="btn-group">
           <button
             type="button"
             className={`btn ${mode === 'provider' ? 'btn-primary-custom' : 'btn-outline-custom'}`}
@@ -145,13 +188,14 @@ export default function AddMaterial() {
           >
             Raw Material Buyer (Seeker)
           </button>
-        </div>
+        </div> : null}
       </div>
 
       <div className="panel-card">
+        {isLoadingListing ? <p className="text-muted">Loading listing…</p> : null}
         {message ? <div className={`inline-message ${messageType}`}>{message}</div> : null}
 
-        <form onSubmit={handleSubmit}>
+        {!isLoadingListing && !listingLoadFailed ? <form onSubmit={handleSubmit}>
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">{mode === 'provider' ? 'Waste Material Name' : 'Required Raw Material'}</label>
@@ -289,11 +333,11 @@ export default function AddMaterial() {
               <button type="button" className="btn btn-outline-custom me-2" onClick={handleLoadDraft}>Load draft</button>
               <button type="button" className="btn btn-secondary-custom me-2" onClick={handleSaveDraft}>Save draft</button>
             </div>
-            <button type="submit" className="btn btn-primary-custom">
-              {mode === 'provider' ? 'Publish Waste Listing' : 'Register Material Requirement'}
+            <button type="submit" className="btn btn-primary-custom" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : editingId ? 'Save changes' : mode === 'provider' ? 'Publish Waste Listing' : 'Register Material Requirement'}
             </button>
           </div>
-        </form>
+        </form> : null}
       </div>
     </div>
   );

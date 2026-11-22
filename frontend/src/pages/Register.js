@@ -11,7 +11,6 @@ const initialForm = {
   phone: '',
   industry: 'Manufacturing',
   location: '',
-  role: 'Waste Supplier',
   terms: false,
 };
 
@@ -68,24 +67,13 @@ export default function RegisterPage() {
             phone: form.phone,
             industry: form.industry,
             location: form.location,
-            company_role: form.role,
           },
         },
       });
 
       if (signUpError) throw signUpError;
 
-      // If user session returned immediately (auto-confirm enabled), create company profile
-      if (signUpData?.user) {
-        try {
-          await supabase.from('companies').insert([{
-            user_id: signUpData.user.id,
-            name: form.company,
-            industry_type: form.industry,
-            description: `Registered partner: ${form.role} based in ${form.location}.`,
-          }]);
-        } catch {}
-      }
+      if (!signUpData?.user) throw new Error('Registration did not return a user. Please try again.');
 
       setMessage('Account created successfully! Check your email to confirm registration or sign in directly.');
       setTimeout(() => navigate('/login'), 1500);
@@ -160,18 +148,9 @@ export default function RegisterPage() {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Company role</label>
-              <select className="form-select" name="role" value={form.role} onChange={handleChange}>
-                <option>Waste Supplier</option>
-                <option>Material Buyer</option>
-                <option>Both</option>
-              </select>
+              <label className="form-label">Company location</label>
+              <input className="form-control" name="location" value={form.location} onChange={handleChange} />
             </div>
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Company location</label>
-            <input className="form-control" name="location" value={form.location} onChange={handleChange} />
           </div>
 
           <div className="checkbox-row mb-3">

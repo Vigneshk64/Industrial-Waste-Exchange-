@@ -12,22 +12,57 @@ import AddMaterial from './pages/AddMaterial';
 import MatchingResults from './pages/MatchingResults';
 import ExchangeRequests from './pages/ExchangeRequests';
 import CompanyProfile from './pages/CompanyProfile';
-import EnvironmentalImpact from './pages/EnvironmentalImpact';
+import AdminDashboard from './pages/AdminDashboard';
+import UnauthorizedPage from './pages/UnauthorizedPage';
 import LoginPage from './pages/Login';
 import RegisterPage from './pages/Register';
 import { isSupabaseConfigured, supabase } from './services/supabase';
 
+/** Protects /admin — only allows users whose app_metadata.role === 'admin' */
+function AdminRoute({ children }) {
+  const [status, setStatus] = useState(null); // null=checking, 'admin', 'denied'
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setStatus('denied');
+      return undefined;
+    }
+
+    let active = true;
+    supabase.auth.getUser()
+      .then(({ data: { user }, error }) => {
+        if (active) setStatus(!error && user?.app_metadata?.role === 'admin' ? 'admin' : 'denied');
+      })
+      .catch(() => {
+        if (active) setStatus('denied');
+      });
+    return () => { active = false; };
+  }, []);
+
+  if (status === null) return <div className="auth-status">Verifying access...</div>;
+  if (status === 'denied') return <UnauthorizedPage />;
+  return children;
+}
+
 function AppLayout() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isNavigationOpen, setIsNavigationOpen] = useState(false);
 
   return (
     <div className="app-shell">
-      <Sidebar onOpenChat={() => setIsChatOpen(true)} onOpenHelp={() => setIsHelpOpen(true)} />
+      <Sidebar
+        isOpen={isNavigationOpen}
+        onClose={() => setIsNavigationOpen(false)}
+        onOpenChat={() => setIsChatOpen(true)}
+        onOpenHelp={() => setIsHelpOpen(true)}
+      />
       <div className="main-panel">
         <Navbar
           onOpenChat={() => setIsChatOpen(prev => !prev)}
           onOpenHelp={() => setIsHelpOpen(true)}
+          onToggleNavigation={() => setIsNavigationOpen((open) => !open)}
+          isNavigationOpen={isNavigationOpen}
         />
         <main className="page-wrapper">
           <Routes>
@@ -38,9 +73,7 @@ function AppLayout() {
             <Route path="/matches" element={<MatchingResults />} />
             <Route path="/requests" element={<ExchangeRequests />} />
             <Route path="/profile" element={<CompanyProfile />} />
-            <Route path="/impact" element={<EnvironmentalImpact />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />          </Routes>
         </main>
         <Footer />
       </div>
@@ -89,7 +122,9 @@ function AuthenticatedApp() {
     };
   }, []);
 
-  if (!isSupabaseConfigured) return <AppLayout />;
+  if (!isSupabaseConfigured) {
+    return <div className="auth-status inline-message error">Supabase is not configured. Authentication is unavailable.</div>;
+  }
   if (isCheckingSession) return <div className="auth-status">Checking your session...</div>;
   if (authError) return <div className="auth-status inline-message error">{authError}</div>;
   return session ? <AppLayout /> : <Navigate to="/login" replace />;
@@ -102,6 +137,8 @@ function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* Admin route — standalone (no Sidebar/Navbar), role-gated */}
+        <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
         <Route path="/*" element={<AuthenticatedApp />} />
       </Routes>
     </BrowserRouter>

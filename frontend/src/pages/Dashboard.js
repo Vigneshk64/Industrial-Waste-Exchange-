@@ -1,229 +1,163 @@
 import { useEffect, useState } from 'react';
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import { ArrowRight, BarChart3, Factory, PackageCheck, Recycle, TrendingUp } from 'lucide-react';
+import { ArrowRight, Factory, PackageCheck, XCircle, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import StatCard from '../components/StatCard';
 import MaterialCard from '../components/MaterialCard';
 import { fetchListings, fetchRequests } from '../services/workflow';
-import { getDashboardMetrics } from '../services/api';
+import { getDashboardMetrics, getNotifications } from '../services/api';
+
+const emptyMetrics = {
+  total_listings: 0,
+  pending_requests: 0,
+  accepted_requests: 0,
+  rejected_requests: 0,
+  completed_exchanges: 0,
+};
+
+function requestCompany(request) {
+  return request.is_incoming
+    ? request.buyer_company?.name || request.seeker_name || 'Buyer company'
+    : request.supplier_company?.name || request.supplier_name || 'Supplier company';
+}
 
 export default function Dashboard() {
   const [materials, setMaterials] = useState([]);
   const [requests, setRequests] = useState([]);
-  const [metrics, setMetrics] = useState({
-    total_listings: 0,
-    active_matches: 0,
-    pending_requests: 0,
-    completed_exchanges: 0,
-    waste_reused_tonnes: '0.00',
-    cost_savings_inr: 0,
-  });
+  const [metrics, setMetrics] = useState(emptyMetrics);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(null);
+  const [notificationError, setNotificationError] = useState('');
 
   useEffect(() => {
+    let active = true;
     async function loadDashboard() {
       try {
-        const [listingsData, requestsData] = await Promise.all([
-          fetchListings(),
+        const [listingsData, requestsData, metricData, notificationResult] = await Promise.all([
+          fetchListings({ mine: true }),
           fetchRequests(),
+          getDashboardMetrics(),
+          getNotifications().then((data) => ({ data })).catch((error) => ({ error })),
         ]);
-
-        setMaterials(listingsData || []);
-        setRequests(requestsData || []);
-
-        try {
-          const apiMetrics = await getDashboardMetrics();
-          if (apiMetrics) {
-            setMetrics(apiMetrics);
-            return;
-          }
-        } catch {}
-
-        // Fallback calculation from local data
-        const completed = (requestsData || []).filter(r => (r.status || '').toLowerCase() === 'completed');
-        const totalKg = completed.reduce((sum, r) => sum + (parseFloat(r.quantity_requested || r.quantity) || 0), 0);
-        
-        setMetrics({
-          total_listings: (listingsData || []).length,
-          active_matches: Math.min((listingsData || []).length, 5),
-          pending_requests: (requestsData || []).filter(r => (r.status || '').toLowerCase() === 'pending').length,
-          completed_exchanges: completed.length,
-          waste_reused_tonnes: (totalKg / 1000).toFixed(2),
-          cost_savings_inr: Math.round(totalKg * 35),
-        });
-      } catch (err) {
-        console.error('Error loading dashboard', err);
+        if (!active) return;
+        setMaterials(listingsData);
+        setRequests(requestsData);
+        setMetrics({ ...emptyMetrics, ...metricData });
+        if (notificationResult.error) {
+          setNotificationError(notificationResult.error.message || 'Unable to load notification count.');
+        } else {
+          setNotificationUnreadCount(notificationResult.data.unread_count || 0);
+        }
+      } catch (error) {
+        if (active) setLoadError(error.message || 'Unable to load dashboard data.');
+      } finally {
+        if (active) setLoading(false);
       }
     }
-
     loadDashboard();
+    return () => { active = false; };
   }, []);
 
   const stats = [
-    { title: 'Material listings', value: String(metrics.total_listings), change: 'Active', trend: 'up', icon: Factory, subtitle: 'In current catalog' },
-    { title: 'Active matches', value: String(metrics.active_matches), change: 'Algorithmic', trend: 'up', icon: Recycle, subtitle: 'Rule-based pairs' },
-    { title: 'Pending requests', value: String(metrics.pending_requests), change: 'In Queue', trend: 'down', icon: PackageCheck, subtitle: 'Awaiting confirmation' },
-    { title: 'Completed exchanges', value: String(metrics.completed_exchanges), change: 'Verified', trend: 'up', icon: TrendingUp, subtitle: 'Closed transactions' },
-    { title: 'Waste reused', value: `${metrics.waste_reused_tonnes} t`, change: 'Diverted', trend: 'up', icon: Recycle, subtitle: 'From landfill pathways' },
-    { title: 'Cost savings', value: `₹${metrics.cost_savings_inr.toLocaleString()}`, change: 'Circular', trend: 'up', icon: BarChart3, subtitle: 'Virgin feedstock saved' },
-  ];
-
-  const recentListings = materials.slice(0, 3);
-  const recentRequests = requests.slice(0, 3);
-
-  // Dynamic monthly activity derived from real records
-  const monthlyData = [
-    { month: 'Start', value: 0 },
-    { month: 'Current', value: parseFloat(metrics.waste_reused_tonnes) || 0 }
+    { title: 'Active listings', value: metrics.total_listings, change: 'Published', icon: Factory },
+    { title: 'Pending buyer requests', value: metrics.pending_requests, change: 'Incoming', icon: PackageCheck, trend: 'down' },
+    { title: 'Accepted requests', value: metrics.accepted_requests, change: 'In progress', icon: CheckCircle2 },
+    { title: 'Rejected requests', value: metrics.rejected_requests, change: 'Closed', icon: XCircle, trend: 'down' },
+    { title: 'Completed exchanges', value: metrics.completed_exchanges, change: 'Recorded', icon: CheckCircle2 },
+    { title: 'Unread notifications', value: notificationUnreadCount === null ? '—' : notificationUnreadCount, change: notificationUnreadCount === null ? 'Unavailable' : 'Inbox', icon: PackageCheck },
   ];
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1>Industrial Waste Exchange</h1>
-          <p>Circular economy resource hub: monitor material flows, exchanges, and carbon diversion.</p>
+          <h1>Company dashboard</h1>
+          <p>Track your published materials and exchange requests.</p>
         </div>
         <div className="header-actions">
-          <Link to="/impact" className="btn btn-secondary-custom">View SDG Impact</Link>
-          <Link to="/add-material" className="btn btn-primary-custom">Add Material</Link>
+          <Link to="/add-material" className="btn btn-primary-custom">Publish a listing</Link>
         </div>
       </div>
 
-      <div className="stat-grid">
-        {stats.map((stat) => (
-          <StatCard key={stat.title} {...stat} />
-        ))}
-      </div>
+      {loadError ? <div role="alert" className="inline-message error">{loadError}</div> : null}
+      {notificationError ? <div role="alert" className="inline-message error">{notificationError}</div> : null}
+
+      {loading ? (
+        <div className="stat-grid" aria-label="Loading dashboard statistics">
+          {stats.map((stat) => <div className="stat-card-skeleton" key={stat.title} />)}
+        </div>
+      ) : !loadError ? (
+        <div className="stat-grid">
+          {stats.map((stat) => <StatCard key={stat.title} {...stat} value={String(stat.value)} />)}
+        </div>
+      ) : null}
 
       <div className="chart-grid mb-4">
-        <div className="chart-card">
+        <section className="panel-card">
           <div className="panel-header">
-            <h3>Cumulative Waste Reused (Tonnes)</h3>
-            <span className="chip">SDG 12 Metric</span>
-          </div>
-          <div style={{ width: '100%', height: 240 }}>
-            <ResponsiveContainer>
-              <AreaChart data={monthlyData}>
-                <defs>
-                  <linearGradient id="wasteFill" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="5%" stopColor="#1a5a46" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#1a5a46" stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e9efe9" />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} />
-                <Tooltip />
-                <Area type="monotone" dataKey="value" stroke="#1a5a46" fill="url(#wasteFill)" strokeWidth={3} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="panel-card">
-          <div className="panel-header">
-            <h3>Environmental & Economic Highlights</h3>
-            <span className="chip">Verified Impact</span>
-          </div>
-          <div className="timeline">
-            <div className="timeline-item">
-              <div className="timeline-dot" />
-              <div>
-                <strong>Waste diverted from landfill</strong>
-                <div className="text-muted">{metrics.waste_reused_tonnes} tonnes repurposed across industries</div>
-              </div>
-            </div>
-            <div className="timeline-item">
-              <div className="timeline-dot" />
-              <div>
-                <strong>Raw material savings</strong>
-                <div className="text-muted">₹{metrics.cost_savings_inr.toLocaleString()} saved vs primary raw materials</div>
-              </div>
-            </div>
-            <div className="timeline-item">
-              <div className="timeline-dot" />
-              <div>
-                <strong>CO₂ avoided</strong>
-                <div className="text-muted">{(parseFloat(metrics.waste_reused_tonnes) * 1.85).toFixed(2)} tCO₂e estimated reduction</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="chart-grid mb-4">
-        <div className="panel-card">
-          <div className="panel-header">
-            <h3>Active Material Listings</h3>
+            <h3>Recent material listings</h3>
             <Link to="/materials" className="text-success fw-semibold">View all</Link>
           </div>
-          {recentListings.length ? (
+          {loading ? <p className="text-muted">Loading listings…</p> : loadError ? null : materials.length ? (
             <div className="material-grid">
-              {recentListings.map((material) => (
-                <MaterialCard key={material.id || material.name} material={material} />
+              {materials.slice(0, 3).map((material) => (
+                <MaterialCard key={material.id} material={{ ...material, is_mine: true }} />
               ))}
             </div>
           ) : (
-            <div className="text-center py-4 text-muted">
-              <p>No listings in database yet.</p>
-              <Link to="/add-material" className="btn btn-primary-custom btn-sm">Create first listing</Link>
+            <div className="empty-state">
+              <p>You have not published any material listings yet.</p>
+              <Link to="/add-material" className="btn btn-primary-custom btn-sm">Publish a listing</Link>
             </div>
           )}
-        </div>
+        </section>
 
-        <div className="panel-card">
+        <section className="panel-card">
           <div className="panel-header">
-            <h3>Recent Exchange Requests</h3>
-            <Link to="/requests" className="text-success fw-semibold">Open queue</Link>
+            <h3>Recent requests</h3>
+            <Link to="/requests" className="text-success fw-semibold">Manage requests</Link>
           </div>
-          {recentRequests.length ? (
+          {loading ? <p className="text-muted">Loading requests…</p> : loadError ? null : requests.length ? (
             <div className="data-list">
-              {recentRequests.map((request) => (
-                <div key={request.id} className="list-row">
+              {requests.slice(0, 5).map((request) => (
+                <div className="list-row" key={request.id}>
                   <div className="list-meta">
-                    <strong>{request.material_name || request.material}</strong>
+                    <strong>{request.material_name || request.listing?.title || 'Material request'}</strong>
                     <span className="text-muted small">
-                      {request.supplier_name || request.supplier} → {request.seeker_name || request.buyer}
+                      {request.is_incoming ? 'Received from' : 'Sent to'} {requestCompany(request)}
+                      {' · '}{request.quantity_requested} {request.listing?.unit || ''}
                     </span>
                   </div>
-                  <div className="text-end">
-                    <span className={`badge ${request.status === 'Accepted' || request.status === 'Completed' ? 'success' : 'warning'}`}>
-                      {request.status}
-                    </span>
-                    <div className="text-muted small mt-1">{request.quantity_requested || request.quantity}</div>
-                  </div>
+                  <span className={`badge ${String(request.status).toLowerCase() === 'accepted' ? 'success' : 'warning'}`}>
+                    {request.status}
+                  </span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-center py-4 text-muted">
-              <p>No active exchange requests yet.</p>
-              <Link to="/materials" className="btn btn-outline-custom btn-sm">Explore materials</Link>
+            <div className="empty-state">
+              <p>No exchange requests have been recorded.</p>
+              <Link to="/materials" className="btn btn-outline-custom btn-sm">Browse materials</Link>
             </div>
           )}
-        </div>
+        </section>
       </div>
 
-      <div className="panel-card">
+      {!loadError ? <section className="panel-card">
         <div className="panel-header">
-          <h3>Quick Actions</h3>
+          <h3>Request activity</h3>
+          <Link to="/requests" className="text-success fw-semibold">Open requests <ArrowRight size={14} /></Link>
         </div>
-        <div className="chip-list">
-          <Link className="chip" to="/add-material">List Available Waste <ArrowRight size={14} className="ms-1" /></Link>
-          <Link className="chip" to="/add-material">Post Required Raw Material</Link>
-          <Link className="chip" to="/matches">Rule-Based Matching</Link>
-          <Link className="chip" to="/requests">Exchange Workflow</Link>
-          <Link className="chip" to="/impact">SDG 9 & SDG 12 Analytics</Link>
+        <div className="chip-list" aria-label="Request activity counts">
+          <span className="chip">Pending · {metrics.pending_requests}</span>
+          <span className="chip">Accepted · {metrics.accepted_requests}</span>
+          <span className="chip">Rejected · {metrics.rejected_requests}</span>
+          <span className="chip">Completed · {metrics.completed_exchanges}</span>
         </div>
-      </div>
+        <p className="text-muted small mt-3 mb-0">
+          Counts reflect requests involving your company. Notification statistics will appear once the notification store is enabled.
+        </p>
+      </section> : null}
     </div>
   );
 }

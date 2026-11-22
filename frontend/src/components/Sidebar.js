@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BarChart3, Bot, Factory, HelpCircle, LayoutDashboard, LogOut, MapPinned, PlusCircle, ShoppingCart, UserCircle2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Bot, Factory, HelpCircle, LayoutDashboard, LogOut, MapPinned, PlusCircle, ShoppingCart, UserCircle2 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { isSupabaseConfigured, supabase } from '../services/supabase';
 
@@ -9,13 +9,35 @@ const navItems = [
   { label: 'Add Material', path: '/add-material', icon: PlusCircle },
   { label: 'Matches', path: '/matches', icon: MapPinned },
   { label: 'Requests', path: '/requests', icon: ShoppingCart },
-  { label: 'Impact', path: '/impact', icon: BarChart3 },
   { label: 'Profile', path: '/profile', icon: UserCircle2 },
 ];
 
-export default function Sidebar({ onOpenChat, onOpenHelp }) {
+export default function Sidebar({ isOpen, onClose, onOpenChat, onOpenHelp }) {
   const navigate = useNavigate();
   const [signOutError, setSignOutError] = useState('');
+  const [isCompactLayout, setIsCompactLayout] = useState(false);
+
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const mediaQuery = window.matchMedia('(max-width: 1100px)');
+    const updateLayout = () => setIsCompactLayout(mediaQuery.matches);
+    updateLayout();
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', updateLayout);
+      return () => mediaQuery.removeEventListener('change', updateLayout);
+    }
+    mediaQuery.addListener(updateLayout);
+    return () => mediaQuery.removeListener(updateLayout);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSignOut = async () => {
     setSignOutError('');
@@ -34,7 +56,16 @@ export default function Sidebar({ onOpenChat, onOpenHelp }) {
   };
 
   return (
-    <aside className="sidebar">
+    <>
+    {isOpen ? (
+      <button type="button" className="sidebar-backdrop" aria-label="Dismiss navigation drawer" onClick={onClose} />
+    ) : null}
+    <aside
+      id="company-navigation"
+      className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}
+      aria-hidden={isCompactLayout && !isOpen}
+      inert={isCompactLayout && !isOpen}
+    >
       <div className="brand-block">
         <div className="brand-mark">WE</div>
         <div className="brand-text">
@@ -45,7 +76,7 @@ export default function Sidebar({ onOpenChat, onOpenHelp }) {
 
       <nav className="sidebar-nav">
         {navItems.map(({ label, path, icon: Icon }) => (
-          <NavLink key={path} to={path} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <NavLink key={path} to={path} onClick={onClose} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
             <Icon size={18} />
             {label}
           </NavLink>
@@ -58,7 +89,7 @@ export default function Sidebar({ onOpenChat, onOpenHelp }) {
         <button
           type="button"
           className="nav-item"
-          onClick={onOpenChat}
+          onClick={() => { onClose(); onOpenChat(); }}
           style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', color: '#d8eedc' }}
         >
           <Bot size={18} color="#7ccaa2" />
@@ -68,7 +99,7 @@ export default function Sidebar({ onOpenChat, onOpenHelp }) {
         <button
           type="button"
           className="nav-item"
-          onClick={onOpenHelp}
+          onClick={() => { onClose(); onOpenHelp(); }}
           style={{ background: 'none', border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', color: '#d8eedc' }}
         >
           <HelpCircle size={18} color="#7ccaa2" />
@@ -88,5 +119,6 @@ export default function Sidebar({ onOpenChat, onOpenHelp }) {
         </button>
       </div>
     </aside>
+    </>
   );
 }

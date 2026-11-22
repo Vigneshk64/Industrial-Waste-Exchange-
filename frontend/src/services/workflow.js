@@ -1,8 +1,6 @@
 import * as api from './api';
 
 const LISTINGS_KEY = 'wasteExchangeListings_clean';
-const REQUESTS_KEY = 'wasteExchangeRequests_clean';
-const REQUIREMENTS_KEY = 'wasteExchangeRequirements_clean';
 
 // Clean empty collections - NO trash dataset
 function readCollection(key) {
@@ -28,105 +26,116 @@ export function getListingsSync() {
 }
 
 export async function fetchListings(params = {}) {
-  try {
-    const data = await api.getListings(params);
-    if (Array.isArray(data) && data.length > 0) return data;
-  } catch {}
-  return readCollection(LISTINGS_KEY);
+  const pageSize = 100;
+  const results = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const data = await api.getListings({ ...params, limit: pageSize, offset });
+    if (!Array.isArray(data)) throw new Error('The listings response was invalid.');
+    results.push(...data);
+    if (data.length < pageSize) return results.map(normalizeListing);
+  }
 }
 
 export function getListings() {
   return readCollection(LISTINGS_KEY);
 }
 
-export function saveListing(form) {
-  const listings = readCollection(LISTINGS_KEY);
-  const listing = {
-    ...form,
-    id: `listing-${Date.now()}`,
-    name: form.name || form.title,
-    title: form.name || form.title,
-    company: form.company || 'Your company',
-    company_name: form.company || 'Your company',
-    status: 'Pending review',
-    availability_status: 'pending_review',
-    description: form.description || '',
-    imageName: form.image ? form.image.name : '',
-    created_at: new Date().toISOString(),
-  };
-  delete listing.image;
-  writeCollection(LISTINGS_KEY, [listing, ...listings]);
+function normalizeListing(listing) {
+  const moderationStatus = listing.moderation_status || 'active';
+  const availabilityStatus = listing.availability_status || 'available';
+  const status = moderationStatus !== 'active'
+    ? moderationStatus[0].toUpperCase() + moderationStatus.slice(1)
+    : ({
+      available: 'Available',
+      booked: 'Reserved',
+      completed: 'Completed',
+      pending_review: 'Pending review',
+    }[availabilityStatus] || availabilityStatus);
 
-  // Attempt backend async push if available
-  api.createListing(listing).catch(() => {});
-  return listing;
+  return {
+    ...listing,
+    name: listing.name || listing.title,
+    category: listing.category || listing.category_name,
+    grade: listing.grade || listing.quality_grade,
+    quantity: typeof listing.quantity === 'number'
+      ? `${listing.quantity} ${listing.unit || 'kg'}`
+      : listing.quantity,
+    price: listing.price ?? listing.price_per_unit ?? null,
+    company: listing.company || listing.company_name,
+    status,
+  };
 }
 
-export function approveListing(id) {
+export async function saveListing(form, listingId) {
+  const rawPrice = form.price || form.price_per_unit;
+  const quantity = Number.parseFloat(form.quantity);
+  const price = rawPrice === undefined || rawPrice === null || rawPrice === '' ? null : Number(rawPrice);
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Enter a positive listing quantity.');
+  if (price !== null && (!Number.isFinite(price) || price < 0)) throw new Error('Enter a valid non-negative unit price.');
+  const payload = {
+    title: form.name || form.title,
+    description: form.description || '',
+    category_name: form.category || form.category_name,
+    quantity,
+    unit: form.unit || 'kg',
+    quality_grade: form.grade || form.quality_grade,
+    price_per_unit: price,
+    location: form.location,
+    safety_notes: form.notes || form.safety_notes || '',
+    available_from: form.date || form.available_from,
+  };
+  const saved = listingId
+    ? await api.updateListing(listingId, payload)
+    : await api.createListing({ ...payload, category: payload.category_name, grade: payload.quality_grade, price: payload.price_per_unit, notes: payload.safety_notes, date: payload.available_from });
+  const listing = normalizeListing({
+    ...saved,
+    imageName: form.image ? form.image.name : '',
+  });
   const listings = readCollection(LISTINGS_KEY);
-  const index = listings.findIndex((listing) => listing.id === id);
-  if (index === -1) throw new Error('This listing could not be found.');
-  if (listings[index].status !== 'Pending review') {
-    throw new Error('Only listings pending review can be published.');
-  }
-
-  const approved = { ...listings[index], status: 'Available', availability_status: 'available' };
-  listings[index] = approved;
-  writeCollection(LISTINGS_KEY, listings);
-  return approved;
+  writeCollection(LISTINGS_KEY, [listing, ...listings]);
+  return listing;
 }
 
 // -----------------------------------------------------------------------------
 // Seeker Material Requirements (Objective 1)
 // -----------------------------------------------------------------------------
-export function getRequirements() {
-  return readCollection(REQUIREMENTS_KEY);
-}
-
 export async function fetchRequirements() {
-  try {
-    const data = await api.getRequirements();
-    if (Array.isArray(data) && data.length > 0) return data;
-  } catch {}
-  return readCollection(REQUIREMENTS_KEY);
+  const data = await api.getRequirements();
+  if (!Array.isArray(data)) throw new Error('The requirements response was invalid.');
+  return data;
 }
 
-export function saveRequirement(form) {
-  const reqs = readCollection(REQUIREMENTS_KEY);
-  const newReq = {
-    ...form,
-    id: `req-${Date.now()}`,
+export async function saveRequirement(form) {
+  const quantity = Number.parseFloat(form.quantity || form.quantity_needed);
+  const price = form.price || form.target_price_per_unit;
+  const pricePerUnit = price === undefined || price === null || price === '' ? null : Number(price);
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Enter a positive requirement quantity.');
+  if (pricePerUnit !== null && (!Number.isFinite(pricePerUnit) || pricePerUnit < 0)) {
+    throw new Error('Enter a valid non-negative target price.');
+  }
+  return api.createRequirement({
     title: form.title || form.name,
-    name: form.title || form.name,
-    company: form.company || 'Your company',
-    company_name: form.company || 'Your company',
-    quantity_needed: form.quantity || form.quantity_needed,
+    description: form.description || '',
+    category_name: form.category || form.category_name,
+    quantity_needed: quantity,
     unit: form.unit || 'kg',
+    min_quality_grade: form.grade || form.min_quality_grade || 'Standard',
+    target_price_per_unit: pricePerUnit,
     delivery_location: form.location || form.delivery_location,
-    status: 'active',
-    created_at: new Date().toISOString(),
-  };
-  writeCollection(REQUIREMENTS_KEY, [newReq, ...reqs]);
-  api.createRequirement(newReq).catch(() => {});
-  return newReq;
+    required_by: form.date || form.required_by,
+  });
 }
 
 // -----------------------------------------------------------------------------
 // Exchange Requests & Lifecycle (Objectives 3 & 4)
 // -----------------------------------------------------------------------------
-export function getRequests() {
-  return readCollection(REQUESTS_KEY);
-}
-
 export async function fetchRequests() {
-  try {
-    const data = await api.getRequests();
-    if (Array.isArray(data) && data.length > 0) return data;
-  } catch {}
-  return readCollection(REQUESTS_KEY);
+  const data = await api.getRequests();
+  if (!Array.isArray(data)) throw new Error('The requests response was invalid.');
+  return data;
 }
 
-export function createRequest(listing, details) {
+export async function createRequest(listing, details) {
   if (!listing || listing.status !== 'Available') {
     throw new Error('This listing is no longer available for requests.');
   }
@@ -134,68 +143,23 @@ export function createRequest(listing, details) {
     throw new Error('Enter the quantity you need.');
   }
 
-  const requests = readCollection(REQUESTS_KEY);
-  const request = {
-    id: `request-${Date.now()}`,
-    listingId: listing.id,
-    listing_id: listing.id,
-    material: listing.name || listing.title,
-    material_name: listing.name || listing.title,
-    buyer: 'Your company',
-    seeker_name: 'Your company',
-    supplier: listing.company || listing.company_name || 'Waste Supplier',
-    supplier_name: listing.company || listing.company_name || 'Waste Supplier',
-    quantity: details.quantity.trim(),
+  return api.createRequest({
+    listing_id: listing.listing_id || listing.id,
     quantity_requested: details.quantity.trim(),
+    offered_price: details.offered_price || listing.price || listing.price_per_unit || null,
     message: (details.message || '').trim(),
-    date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-    status: 'Pending',
-    price: listing.price ? `₹${listing.price}` : 'To be agreed',
-    created_at: new Date().toISOString(),
-  };
-  writeCollection(REQUESTS_KEY, [request, ...requests]);
-  api.createRequest(request).catch(() => {});
-  return request;
+  });
 }
 
-const requestTransitions = {
-  Pending: 'Accepted',
-  pending: 'accepted',
-  Accepted: 'In Transit',
-  accepted: 'in_transit',
-  'In Transit': 'Awaiting confirmation',
-  'Awaiting confirmation': 'Completed',
-  in_transit: 'completed',
-};
-
-export function advanceRequest(id) {
-  const requests = readCollection(REQUESTS_KEY);
-  const index = requests.findIndex((request) => request.id === id);
-  if (index === -1) throw new Error('This request could not be found.');
-
-  const nextStatus = requestTransitions[requests[index].status];
-  if (!nextStatus) throw new Error('This request cannot move to another step.');
-
-  const updated = { ...requests[index], status: nextStatus };
-  requests[index] = updated;
-  writeCollection(REQUESTS_KEY, requests);
-  api.advanceRequest(id).catch(() => {});
-  return updated;
+export async function advanceRequest(id) {
+  return api.advanceRequest(id);
 }
 
-export function saveFeedback(id, rating, comment = '') {
-  const requests = readCollection(REQUESTS_KEY);
-  const index = requests.findIndex((request) => request.id === id);
-  if (index === -1 || requests[index].status !== 'Completed') {
-    throw new Error('Feedback is available after the exchange is completed.');
-  }
+export async function saveFeedback(id, rating, comment = '') {
   if (!Number.isInteger(Number(rating)) || Number(rating) < 1 || Number(rating) > 5) {
     throw new Error('Choose a rating from 1 to 5.');
   }
 
-  const updated = { ...requests[index], rating: Number(rating), feedback: comment.trim() };
-  requests[index] = updated;
-  writeCollection(REQUESTS_KEY, requests);
-  api.submitFeedback(id, rating, comment).catch(() => {});
-  return updated;
+  await api.submitFeedback(id, rating, comment);
+  return { id, rating: Number(rating), feedback: comment.trim() };
 }
