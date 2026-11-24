@@ -65,10 +65,20 @@ async function getPublicCompanyProfiles(companyIds) {
 }
 
 function sendDatabaseError(res, error) {
-  console.error('Database request failed:', error.message);
-  return res.status(500).json({ error: 'Unable to complete the requested operation.' });
-}
+  console.error('Database request failed:', {
+    name: error?.name,
+    message: error?.message,
+    code: error?.code,
+    details: error?.details,
+    hint: error?.hint,
+    stack: error?.stack,
+    raw: String(error)
+  });
 
+  return res.status(500).json({
+    error: 'Unable to complete the requested operation.'
+  });
+}
 // ------------------------------------------------------------------------------
 // Health Check
 // ------------------------------------------------------------------------------
@@ -603,6 +613,7 @@ app.post('/api/requests/:id/feedback', requireAuth, requireCompany, async (req, 
 // ------------------------------------------------------------------------------
 // Dashboard & Environmental Impact Analytics (Objective 5: SDG 9 & 12)
 // ------------------------------------------------------------------------------
+
 app.get('/api/analytics/dashboard', requireAuth, requireCompany, async (req, res) => {
   try {
     const [lRes, rRes] = await Promise.all([
@@ -613,6 +624,27 @@ app.get('/api/analytics/dashboard', requireAuth, requireCompany, async (req, res
       req.supabase.from('exchange_requests')
         .select('id, status, seeker_id, listing:waste_listings!exchange_requests_listing_id_fkey(provider_id)'),
     ]);
+
+    // Temporary debugging
+        console.log('\n--- ANALYTICS DEBUG V2 ---');
+
+    console.log('Full listings response:');
+    console.dir(lRes, { depth: null });
+
+    console.log('Listings error JSON:');
+    console.log(JSON.stringify(lRes.error));
+
+    console.log('Listings error constructor:');
+    console.log(lRes.error?.constructor?.name);
+
+    console.log('Listings status:', lRes.status);
+    console.log('Listings statusText:', lRes.statusText);
+
+    console.log('Listings count:', lRes.count);
+    console.log('Listings data:', lRes.data);
+
+    console.log('--- END ANALYTICS DEBUG V2 ---\n');
+
     if (lRes.error) throw lRes.error;
     if (rRes.error) throw rRes.error;
 
@@ -620,6 +652,7 @@ app.get('/api/analytics/dashboard', requireAuth, requireCompany, async (req, res
       request.seeker_id === req.company.id || request.listing?.provider_id === req.company.id
     ));
     const incoming = requests.filter((request) => request.listing?.provider_id === req.company.id);
+
     return res.json({
       total_listings: lRes.count || 0,
       pending_requests: incoming.filter((request) => request.status === 'pending').length,
@@ -631,6 +664,7 @@ app.get('/api/analytics/dashboard', requireAuth, requireCompany, async (req, res
     return sendDatabaseError(res, err);
   }
 });
+
 
 app.get('/api/analytics/impact', requireAuth, requireCompany, async (req, res) => {
   try {
